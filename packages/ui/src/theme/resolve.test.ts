@@ -168,6 +168,7 @@ describe("theme resolve", () => {
     expect(lightTokens["icon-success-base"]).toBe(lightSuccess[6])
     expect(darkTokens["icon-success-base"]).toBe(darkSuccess[8])
     expect(darkTokens["surface-interactive-weak"]).toBe(darkInteractive[3])
+    expect(darkTokens["text-interactive-base"]).toBe(darkInteractive[9])
     expect(lightTokens["icon-base"]).toBe(lightNeutral[8])
     expect(lightTokens["icon-disabled"]).toBe(lightNeutral[6])
     expect(darkTokens["icon-base"]).toBe(darkNeutral[7])

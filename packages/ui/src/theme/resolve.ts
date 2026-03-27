@@ -67,7 +67,7 @@ export function resolveThemeVariant(variant: ThemeVariant, isDark: boolean): Res
   )
   const brand = primary[8]
   const brandHover = primary[9]
-  const interText = isDark ? shift(interactive[8], { l: 0.012, c: 1.08 }) : text(interactive)
+  const interText = isDark ? interactive[9] : text(interactive)
   const inter = interactive[tone]
   const interHover = interactive[isDark ? 7 : 6]
   const interWeak = interactive[isDark ? 3 : soft]
