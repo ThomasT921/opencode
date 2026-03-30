@@ -82,7 +82,15 @@ export async function resolvePath(text: string, root: string, shell: string) {
 
 export function formatShellDescription(
   template: string,
-  opts: { name: string; shellName: string; chaining: string; guidance: string },
+  opts: {
+    name: string
+    shellName: string
+    chaining: string
+    guidance: string
+    listCmd: string
+    toolName: string
+    gitCmds: string
+  },
 ) {
   return template
     .replaceAll("${directory}", Instance.directory)
@@ -106,7 +114,15 @@ export type ShellType = "bash" | "pwsh" | "powershell"
 
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
-export function createShellTool(opts: { id: ShellType; shellName: string; chaining: string; guidance: string }) {
+export function createShellTool(opts: {
+  id: ShellType
+  shellName: string
+  chaining: string
+  guidance: string
+  listCmd: string
+  toolName: string
+  gitCmds: string
+}) {
   const log = Log.create({ service: `${opts.id}-tool` })
 
   return Tool.define(opts.id, async () => {
@@ -120,6 +136,9 @@ export function createShellTool(opts: { id: ShellType; shellName: string; chaini
         shellName: opts.shellName,
         chaining: opts.chaining,
         guidance: opts.guidance,
+        listCmd: opts.listCmd,
+        toolName: opts.toolName,
+        gitCmds: opts.gitCmds,
       }),
       parameters: z.object({
         command: z.string().describe("The command to execute"),
