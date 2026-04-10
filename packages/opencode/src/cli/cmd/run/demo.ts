@@ -17,7 +17,7 @@ import path from "path"
 import type { Event } from "@opencode-ai/sdk/v2"
 import { createSessionData, reduceSessionData, type SessionData } from "./session-data"
 import { writeSessionOutput } from "./stream"
-import type { FooterApi, PermissionReply, QuestionReject, QuestionReply, RunDemo } from "./types"
+import type { FooterApi, PermissionReply, QuestionReject, QuestionReply, RunDemo, RunPrompt } from "./types"
 
 const KINDS = ["text", "reasoning", "bash", "write", "edit", "patch", "task", "todo", "question", "error", "mix"]
 const PERMISSIONS = ["edit", "bash", "read", "task", "external", "doom"] as const
@@ -975,8 +975,8 @@ export function createRunDemo(input: Input) {
     }
   }
 
-  const prompt = async (line: string, signal?: AbortSignal): Promise<boolean> => {
-    const text = line.trim()
+  const prompt = async (line: RunPrompt, signal?: AbortSignal): Promise<boolean> => {
+    const text = line.text.trim()
     const list = text.split(/\s+/)
     const cmd = list[0] || ""
 

@@ -52,6 +52,7 @@ type Inline = {
 type SessionInfo = {
   id: string
   title?: string
+  directory?: string
 }
 
 function inline(info: Inline) {
@@ -227,24 +228,41 @@ export const RunCommand = cmd({
       process.exit(1)
     }
 
+    const root = Filesystem.resolve(process.env.PWD ?? process.cwd())
     const directory = (() => {
-      if (!args.dir) return undefined
+      if (!args.dir) return args.attach ? undefined : root
       if (args.attach) return args.dir
+
       try {
-        process.chdir(args.dir)
+        process.chdir(path.isAbsolute(args.dir) ? args.dir : path.join(root, args.dir))
         return process.cwd()
       } catch {
         UI.error("Failed to change directory to " + args.dir)
         process.exit(1)
       }
     })()
+    const attachHeaders = (() => {
+      if (!args.attach) return undefined
+      const password = args.password ?? process.env.OPENCODE_SERVER_PASSWORD
+      if (!password) return undefined
+      const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode"
+      const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
+      return { Authorization: auth }
+    })()
+    const attachSDK = (dir?: string) => {
+      return createOpencodeClient({
+        baseUrl: args.attach!,
+        directory: dir,
+        headers: attachHeaders,
+      })
+    }
 
     const files: FilePart[] = []
     if (args.file) {
       const list = Array.isArray(args.file) ? args.file : [args.file]
 
       for (const filePath of list) {
-        const resolvedPath = path.resolve(process.cwd(), filePath)
+        const resolvedPath = path.resolve(args.attach ? root : (directory ?? root), filePath)
         if (!(await Filesystem.exists(resolvedPath))) {
           UI.error(`File not found: ${filePath}`)
           process.exit(1)
@@ -324,12 +342,14 @@ export const RunCommand = cmd({
           return {
             id,
             title: forked.data?.title ?? current.data.title,
+            directory: forked.data?.directory ?? current.data.directory,
           }
         }
 
         return {
           id: current.data.id,
           title: current.data.title,
+          directory: current.data.directory,
         }
       }
 
@@ -347,6 +367,7 @@ export const RunCommand = cmd({
         return {
           id,
           title: forked.data?.title ?? base.title,
+          directory: forked.data?.directory ?? base.directory,
         }
       }
 
@@ -354,6 +375,7 @@ export const RunCommand = cmd({
         return {
           id: base.id,
           title: base.title,
+          directory: base.directory,
         }
       }
 
@@ -370,6 +392,7 @@ export const RunCommand = cmd({
       return {
         id,
         title: result.data?.title ?? name,
+        directory: result.data?.directory,
       }
     }
 
@@ -386,6 +409,23 @@ export const RunCommand = cmd({
       if (!res.error && "data" in res && res.data?.share?.url) {
         UI.println(UI.Style.TEXT_INFO_BOLD + "~  " + res.data.share.url)
       }
+    }
+
+    async function current(sdk: OpencodeClient): Promise<string> {
+      if (!args.attach) {
+        return directory ?? root
+      }
+
+      const next = await sdk.path
+        .get()
+        .then((x) => x.data?.directory)
+        .catch(() => undefined)
+      if (next) {
+        return next
+      }
+
+      UI.error("Failed to resolve remote directory")
+      process.exit(1)
     }
 
     async function localAgent() {
@@ -475,7 +515,11 @@ export const RunCommand = cmd({
         return false
       }
 
-      async function loop(events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
+      // Consume one subscribed event stream for the active session and mirror it
+      // to stdout/UI. `client` is passed explicitly because attach mode may
+      // rebind the SDK to the session's directory after the subscription is
+      // created, and replies issued from inside the loop must use that client.
+      async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
         const toggles = new Map<string, boolean>()
         let error: string | undefined
 
@@ -582,7 +626,7 @@ export const RunCommand = cmd({
             if (permission.sessionID !== sessionID) continue
 
             if (args["dangerously-skip-permissions"]) {
-              await sdk.permission.reply({
+              await client.permission.reply({
                 requestID: permission.id,
                 reply: "once",
               })
@@ -592,7 +636,7 @@ export const RunCommand = cmd({
                 UI.Style.TEXT_NORMAL +
                   `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
               )
-              await sdk.permission.reply({
+              await client.permission.reply({
                 requestID: permission.id,
                 reply: "reject",
               })
@@ -601,26 +645,29 @@ export const RunCommand = cmd({
         }
       }
 
-      // Validate agent if specified
-      const agent = await pickAgent(sdk)
-
       const sess = await session(sdk)
       if (!sess?.id) {
         UI.error("Session not found")
         process.exit(1)
       }
+      const cwd = args.attach ? (directory ?? sess.directory ?? (await current(sdk))) : (directory ?? root)
+      const client = args.attach ? attachSDK(cwd) : sdk
+
+      // Validate agent if specified
+      const agent = await pickAgent(client)
+
       const sessionID = sess.id
-      await share(sdk, sessionID)
+      await share(client, sessionID)
 
       if (!args.interactive) {
-        const events = await sdk.event.subscribe()
-        loop(events).catch((e) => {
+        const events = await client.event.subscribe()
+        loop(client, events).catch((e) => {
           console.error(e)
           process.exit(1)
         })
 
         if (args.command) {
-          await sdk.session.command({
+          await client.session.command({
             sessionID,
             agent,
             model: args.model,
@@ -632,7 +679,7 @@ export const RunCommand = cmd({
         }
 
         const model = pick(args.model)
-        await sdk.session.prompt({
+        await client.session.prompt({
           sessionID,
           agent,
           model,
@@ -645,7 +692,8 @@ export const RunCommand = cmd({
       const model = pick(args.model)
       const { runInteractiveMode } = await runtimeTask
       await runInteractiveMode({
-        sdk,
+        sdk: client,
+        directory: cwd,
         sessionID,
         sessionTitle: sess.title,
         resume: Boolean(args.session) && !args.fork,
@@ -671,6 +719,7 @@ export const RunCommand = cmd({
       }) as typeof globalThis.fetch
 
       return await runInteractiveLocalMode({
+        directory: directory ?? root,
         fetch: fetchFn,
         resolveAgent: localAgent,
         session,
@@ -687,22 +736,11 @@ export const RunCommand = cmd({
     }
 
     if (args.attach) {
-      const headers = (() => {
-        const password = args.password ?? process.env.OPENCODE_SERVER_PASSWORD
-        if (!password) return undefined
-        const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode"
-        const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
-        return { Authorization: auth }
-      })()
-      const sdk = createOpencodeClient({
-        baseUrl: args.attach,
-        directory,
-        headers,
-      })
+      const sdk = attachSDK(directory)
       return await execute(sdk)
     }
 
-    await bootstrap(process.cwd(), async () => {
+    await bootstrap(directory ?? root, async () => {
       const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const { Server } = await import("../../server/server")
         const request = new Request(input, init)
@@ -711,6 +749,7 @@ export const RunCommand = cmd({
       const sdk = createOpencodeClient({
         baseUrl: "http://opencode.internal",
         fetch: fetchFn,
+        directory,
       })
       await execute(sdk)
     })

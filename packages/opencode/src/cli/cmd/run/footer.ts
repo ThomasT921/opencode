@@ -26,7 +26,7 @@
 import { CliRenderEvents, type CliRenderer } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { createComponent, createSignal, type Accessor, type Setter } from "solid-js"
-import { TEXTAREA_MAX_ROWS, TEXTAREA_MIN_ROWS } from "./footer.prompt"
+import { PROMPT_MAX_ROWS, TEXTAREA_MIN_ROWS } from "./footer.prompt"
 import { printableBinding } from "./prompt.shared"
 import { RunFooterView } from "./footer.view"
 import { normalizeEntry } from "./scrollback.format"
@@ -35,10 +35,13 @@ import { spacerWriter } from "./scrollback.writer"
 import { toolView } from "./tool"
 import type { RunTheme } from "./theme"
 import type {
+  RunAgent,
   FooterApi,
   FooterEvent,
   FooterKeybinds,
   FooterPatch,
+  RunPrompt,
+  RunResource,
   FooterState,
   FooterView,
   PermissionReply,
@@ -54,10 +57,14 @@ type CycleResult = {
 }
 
 type RunFooterOptions = {
+  directory: string
+  findFiles: (query: string) => Promise<string[]>
+  agents: RunAgent[]
+  resources: RunResource[]
   agentLabel: string
   modelLabel: string
   first: boolean
-  history?: string[]
+  history?: RunPrompt[]
   theme: RunTheme
   keybinds: FooterKeybinds
   diffStyle: RunDiffStyle
@@ -72,11 +79,10 @@ type RunFooterOptions = {
 const PERMISSION_ROWS = 12
 const QUESTION_ROWS = 14
 
-
 export class RunFooter implements FooterApi {
   private closed = false
   private destroyed = false
-  private prompts = new Set<(text: string) => void>()
+  private prompts = new Set<(input: RunPrompt) => void>()
   private closes = new Set<() => void>()
   // Most recent visible scrollback commit.
   private tail: StreamCommit | undefined
@@ -124,8 +130,12 @@ export class RunFooter implements FooterApi {
     void render(
       () =>
         createComponent(RunFooterView, {
+          directory: options.directory,
           state: this.state,
           view: this.view,
+          findFiles: options.findFiles,
+          agents: () => options.agents,
+          resources: () => options.resources,
           theme: options.theme.footer,
           block: options.theme.block,
           diffStyle: options.diffStyle,
@@ -155,7 +165,7 @@ export class RunFooter implements FooterApi {
     return this.closed || this.destroyed || this.renderer.isDestroyed
   }
 
-  public onPrompt(fn: (text: string) => void): () => void {
+  public onPrompt(fn: (input: RunPrompt) => void): () => void {
     this.prompts.add(fn)
     return () => {
       this.prompts.delete(fn)
@@ -165,7 +175,7 @@ export class RunFooter implements FooterApi {
   public onClose(fn: () => void): () => void {
     if (this.isClosed) {
       fn()
-      return () => { }
+      return () => {}
     }
 
     this.closes.add(fn)
@@ -320,7 +330,7 @@ export class RunFooter implements FooterApi {
       return Promise.resolve()
     }
 
-    return this.renderer.idle().catch(() => { })
+    return this.renderer.idle().catch(() => {})
   }
 
   public close(): void {
@@ -377,7 +387,7 @@ export class RunFooter implements FooterApi {
         ? this.base + PERMISSION_ROWS
         : type === "question"
           ? this.base + QUESTION_ROWS
-          : Math.max(this.base + TEXTAREA_MIN_ROWS, Math.min(this.base + TEXTAREA_MAX_ROWS, this.base + this.rows))
+          : Math.max(this.base + TEXTAREA_MIN_ROWS, Math.min(this.base + PROMPT_MAX_ROWS, this.base + this.rows))
 
     if (height !== this.renderer.footerHeight) {
       this.renderer.footerHeight = height
@@ -389,7 +399,7 @@ export class RunFooter implements FooterApi {
       return
     }
 
-    const rows = Math.max(TEXTAREA_MIN_ROWS, Math.min(TEXTAREA_MAX_ROWS, value))
+    const rows = Math.max(TEXTAREA_MIN_ROWS, Math.min(PROMPT_MAX_ROWS, value))
     if (rows === this.rows) {
       return
     }
@@ -400,7 +410,7 @@ export class RunFooter implements FooterApi {
     }
   }
 
-  private handlePrompt = (text: string): boolean => {
+  private handlePrompt = (input: RunPrompt): boolean => {
     if (this.isClosed) {
       return false
     }
@@ -415,7 +425,7 @@ export class RunFooter implements FooterApi {
     }
 
     for (const fn of [...this.prompts]) {
-      fn(text)
+      fn(input)
     }
 
     return true

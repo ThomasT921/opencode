@@ -25,7 +25,7 @@ export { pickVariant, resolveVariant } from "./variant.shared"
 /** @internal Exported for testing */
 export { runPromptQueue } from "./runtime.queue"
 
-type BootContext = Pick<RunInput, "sdk" | "sessionID" | "sessionTitle" | "agent" | "model" | "variant">
+type BootContext = Pick<RunInput, "sdk" | "directory" | "sessionID" | "sessionTitle" | "agent" | "model" | "variant">
 
 type RunRuntimeInput = {
   boot: () => Promise<BootContext>
@@ -38,6 +38,7 @@ type RunRuntimeInput = {
 }
 
 type RunLocalInput = {
+  directory: string
   fetch: typeof globalThis.fetch
   resolveAgent: () => Promise<string | undefined>
   session: (sdk: RunInput["sdk"]) => Promise<{ id: string; title?: string } | undefined>
@@ -66,21 +67,39 @@ async function runInteractiveRuntime(input: RunRuntimeInput): Promise<void> {
   const modelTask = resolveModelInfo(ctx.sdk, ctx.model)
   const sessionTask = resolveSessionInfo(ctx.sdk, ctx.sessionID, ctx.model)
   const savedTask = resolveSavedVariant(ctx.model)
+  const agentsTask = ctx.sdk.app
+    .agents({ directory: ctx.directory })
+    .then((x) => x.data ?? [])
+    .catch(() => [])
+  const resourcesTask = ctx.sdk.experimental.resource
+    .list({ directory: ctx.directory })
+    .then((x) => Object.values(x.data ?? {}))
+    .catch(() => [])
   let variants: string[] = []
   let limits: Record<string, number> = {}
   let aborting = false
   let shown = false
   let demo: ReturnType<typeof createRunDemo> | undefined
-  const [keybinds, diffStyle, session, savedVariant] = await Promise.all([
+  const [keybinds, diffStyle, session, savedVariant, agents, resources] = await Promise.all([
     keybindTask,
     diffTask,
     sessionTask,
     savedTask,
+    agentsTask,
+    resourcesTask,
   ])
   shown = !session.first
   let activeVariant = resolveVariant(ctx.variant, session.variant, savedVariant, variants)
 
   const shell = await createRuntimeLifecycle({
+    directory: ctx.directory,
+    findFiles: (query) =>
+      ctx.sdk.find
+        .files({ query, directory: ctx.directory })
+        .then((x) => x.data ?? [])
+        .catch(() => []),
+    agents,
+    resources,
     sessionID: ctx.sessionID,
     sessionTitle: ctx.sessionTitle,
     first: session.first,
@@ -254,6 +273,7 @@ export async function runInteractiveLocalMode(input: RunLocalInput): Promise<voi
   const sdk = createOpencodeClient({
     baseUrl: "http://opencode.internal",
     fetch: input.fetch,
+    directory: input.directory,
   })
 
   return runInteractiveRuntime({
@@ -272,6 +292,7 @@ export async function runInteractiveLocalMode(input: RunLocalInput): Promise<voi
 
       return {
         sdk,
+        directory: input.directory,
         sessionID: session.id,
         sessionTitle: session.title,
         agent,
@@ -292,6 +313,7 @@ export async function runInteractiveMode(input: RunInput): Promise<void> {
     demoText: input.demoText,
     boot: async () => ({
       sdk: input.sdk,
+      directory: input.directory,
       sessionID: input.sessionID,
       sessionTitle: input.sessionTitle,
       agent: input.agent,

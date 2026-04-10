@@ -11,7 +11,7 @@
 // Resolves when the footer closes and all in-flight work finishes.
 import { Locale } from "../../../util/locale"
 import { isExitCommand } from "./prompt.shared"
-import type { FooterApi, FooterEvent } from "./types"
+import type { FooterApi, FooterEvent, RunPrompt } from "./types"
 
 type Trace = {
   write(type: string, data?: unknown): void
@@ -22,7 +22,7 @@ export type QueueInput = {
   initialInput?: string
   trace?: Trace
   onPrompt?: () => void
-  run: (prompt: string, signal: AbortSignal) => Promise<void>
+  run: (prompt: RunPrompt, signal: AbortSignal) => Promise<void>
 }
 
 // Runs the prompt queue until the footer closes.
@@ -32,7 +32,7 @@ export type QueueInput = {
 // a turn is running, they queue up and execute in order. The footer shows
 // the queue depth so the user knows how many are pending.
 export async function runPromptQueue(input: QueueInput): Promise<void> {
-  const q: string[] = []
+  const q: RunPrompt[] = []
   let busy = false
   let closed = input.footer.isClosed
   let ctrl: AbortController | undefined
@@ -102,7 +102,7 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
             (error) => ({ type: "error" as const, error }),
           )
           await input.footer.idle()
-          const commit = { kind: "user", text: prompt, phase: "start", source: "system" } as const
+          const commit = { kind: "user", text: prompt.text, phase: "start", source: "system" } as const
           input.trace?.write("ui.commit", commit)
           input.footer.append(commit)
           const out = await Promise.race([task, until.then(() => ({ type: "closed" as const }))])
@@ -147,13 +147,12 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
     }
   }
 
-  const push = (text: string) => {
-    const prompt = text
-    if (!prompt.trim() || closed) {
+  const push = (prompt: RunPrompt) => {
+    if (!prompt.text.trim() || closed) {
       return
     }
 
-    if (isExitCommand(prompt)) {
+    if (isExitCommand(prompt.text)) {
       input.footer.close()
       return
     }
@@ -181,8 +180,8 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
     void pump().catch(fail)
   }
 
-  const offPrompt = input.footer.onPrompt((text) => {
-    push(text)
+  const offPrompt = input.footer.onPrompt((prompt) => {
+    push(prompt)
   })
   const offClose = input.footer.onClose(() => {
     closed = true
@@ -197,7 +196,7 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
       return
     }
 
-    push(input.initialInput ?? "")
+    push({ text: input.initialInput ?? "", parts: [] })
     await pump()
 
     if (!closed) {

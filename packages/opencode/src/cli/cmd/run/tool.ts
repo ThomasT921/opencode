@@ -127,13 +127,13 @@ export type ToolSnapshot =
   | ToolTodoSnapshot
   | ToolQuestionSnapshot
 
-export type ToolProps<T extends Tool.Info> = {
+export type ToolProps<T = Tool.Info> = {
   input: Partial<Tool.InferParameters<T>>
   metadata: Partial<Tool.InferMetadata<T>>
   frame: ToolFrame
 }
 
-type ToolPermissionProps<T extends Tool.Info> = {
+type ToolPermissionProps<T = Tool.Info> = {
   input: Partial<Tool.InferParameters<T>>
   metadata: Partial<Tool.InferMetadata<T>>
   patterns: string[]
@@ -169,7 +169,7 @@ type ToolDefs = {
 
 type ToolName = keyof ToolDefs
 
-type ToolRule<T extends Tool.Info> = {
+type ToolRule<T = Tool.Info> = {
   view: ToolView
   run: (props: ToolProps<T>) => ToolInline
   scroll?: Partial<Record<ToolPhase, (props: ToolProps<T>) => string>>
@@ -191,7 +191,7 @@ function dict(v: unknown): ToolDict {
   return v as ToolDict
 }
 
-function props<T extends Tool.Info = Tool.Info>(frame: ToolFrame): ToolProps<T> {
+function props<T = Tool.Info>(frame: ToolFrame): ToolProps<T> {
   return {
     input: frame.input as Partial<Tool.InferParameters<T>>,
     metadata: frame.meta as Partial<Tool.InferMetadata<T>>,
@@ -199,7 +199,7 @@ function props<T extends Tool.Info = Tool.Info>(frame: ToolFrame): ToolProps<T> 
   }
 }
 
-function permission<T extends Tool.Info = Tool.Info>(ctx: ToolPermissionCtx): ToolPermissionProps<T> {
+function permission<T = Tool.Info>(ctx: ToolPermissionCtx): ToolPermissionProps<T> {
   return {
     input: ctx.input as Partial<Tool.InferParameters<T>>,
     metadata: ctx.meta as Partial<Tool.InferMetadata<T>>,

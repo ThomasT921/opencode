@@ -21,9 +21,24 @@ export type RunFilePart = {
 }
 
 type PromptModel = Parameters<OpencodeClient["session"]["prompt"]>[0]["model"]
+type PromptInput = Parameters<OpencodeClient["session"]["prompt"]>[0]
+
+export type RunPromptPart = NonNullable<PromptInput["parts"]>[number]
+
+export type RunPrompt = {
+  text: string
+  parts: RunPromptPart[]
+}
+
+export type RunAgent = NonNullable<Awaited<ReturnType<OpencodeClient["app"]["agents"]>>["data"]>[number]
+
+type RunResourceMap = NonNullable<Awaited<ReturnType<OpencodeClient["experimental"]["resource"]["list"]>>["data"]>
+
+export type RunResource = RunResourceMap[string]
 
 export type RunInput = {
   sdk: OpencodeClient
+  directory: string
   sessionID: string
   sessionTitle?: string
   resume?: boolean
@@ -170,7 +185,7 @@ export type StreamCommit = {
 // touch the renderer directly -- they go through this interface.
 export type FooterApi = {
   readonly isClosed: boolean
-  onPrompt(fn: (text: string) => void): () => void
+  onPrompt(fn: (input: RunPrompt) => void): () => void
   onClose(fn: () => void): () => void
   event(next: FooterEvent): void
   append(commit: StreamCommit): void

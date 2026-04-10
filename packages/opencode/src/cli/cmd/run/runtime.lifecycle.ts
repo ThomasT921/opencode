@@ -18,8 +18,11 @@ import type {
   PermissionReply,
   QuestionReject,
   QuestionReply,
+  RunAgent,
   RunDiffStyle,
   RunInput,
+  RunPrompt,
+  RunResource,
 } from "./types"
 import { formatModelLabel } from "./variant.shared"
 
@@ -42,10 +45,14 @@ type FooterLabels = {
 }
 
 export type LifecycleInput = {
+  directory: string
+  findFiles: (query: string) => Promise<string[]>
+  agents: RunAgent[]
+  resources: RunResource[]
   sessionID: string
   sessionTitle?: string
   first: boolean
-  history: string[]
+  history: RunPrompt[]
   agent: string | undefined
   model: RunInput["model"]
   variant: string | undefined
@@ -84,21 +91,21 @@ function shutdown(renderer: CliRenderer): void {
   }
 }
 
-function splashTitle(title: string | undefined, history: string[]): string | undefined {
+function splashTitle(title: string | undefined, history: RunPrompt[]): string | undefined {
   if (title && !DEFAULT_TITLE.test(title)) {
     return title
   }
 
-  const next = history.find((item) => item.trim().length > 0)
-  return next ?? title
+  const next = history.find((item) => item.text.trim().length > 0)
+  return next?.text ?? title
 }
 
-function splashSession(title: string | undefined, history: string[]): boolean {
+function splashSession(title: string | undefined, history: RunPrompt[]): boolean {
   if (title && !DEFAULT_TITLE.test(title)) {
     return true
   }
 
-  return !!history.find((item) => item.trim().length > 0)
+  return !!history.find((item) => item.text.trim().length > 0)
 }
 
 function footerLabels(input: Pick<RunInput, "agent" | "model" | "variant">): FooterLabels {
@@ -189,6 +196,10 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     variant: input.variant,
   })
   const footer = new RunFooter(renderer, {
+    directory: input.directory,
+    findFiles: input.findFiles,
+    agents: input.agents,
+    resources: input.resources,
     ...labels,
     first: input.first,
     history: input.history,

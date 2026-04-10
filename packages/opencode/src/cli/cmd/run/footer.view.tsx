@@ -14,12 +14,15 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { Match, Show, Switch, createMemo } from "solid-js"
 import "opentui-spinner/solid"
 import { createColors, createFrames } from "../tui/ui/spinner"
-import { RunPromptBody, createPromptState, hintFlags } from "./footer.prompt"
+import { RunPromptAutocomplete, RunPromptBody, createPromptState, hintFlags } from "./footer.prompt"
 import { RunPermissionBody } from "./footer.permission"
 import { RunQuestionBody } from "./footer.question"
 import { printableBinding } from "./prompt.shared"
 import type {
   FooterKeybinds,
+  RunAgent,
+  RunPrompt,
+  RunResource,
   FooterState,
   FooterView,
   PermissionReply,
@@ -44,15 +47,19 @@ const EMPTY_BORDER = {
 }
 
 type RunFooterViewProps = {
+  directory: string
+  findFiles: (query: string) => Promise<string[]>
+  agents: () => RunAgent[]
+  resources: () => RunResource[]
   state: () => FooterState
   view?: () => FooterView
   theme?: RunFooterTheme
   block?: RunBlockTheme
   diffStyle?: RunDiffStyle
   keybinds: FooterKeybinds
-  history?: string[]
+  history?: RunPrompt[]
   agent: string
-  onSubmit: (text: string) => boolean
+  onSubmit: (input: RunPrompt) => boolean
   onPermissionReply: (input: PermissionReply) => void | Promise<void>
   onQuestionReply: (input: QuestionReply) => void | Promise<void>
   onQuestionReject: (input: QuestionReject) => void | Promise<void>
@@ -107,6 +114,10 @@ export function RunFooterView(props: RunFooterViewProps) {
     return view.type === "question" ? view : undefined
   })
   const composer = createPromptState({
+    directory: props.directory,
+    findFiles: props.findFiles,
+    agents: props.agents,
+    resources: props.resources,
     keybinds: props.keybinds,
     state: props.state,
     view: () => active().type,
@@ -122,6 +133,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     onRows: props.onRows,
     onStatus: props.onStatus,
   })
+  const menu = createMemo(() => active().type === "prompt" && composer.visible())
 
   return (
     <box
@@ -192,7 +204,15 @@ export function RunFooterView(props: RunFooterViewProps) {
             </Switch>
           </box>
 
-          <box id="run-direct-footer-meta-row" width="100%" flexDirection="row" gap={1} paddingLeft={2} flexShrink={0} paddingTop={1}>
+          <box
+            id="run-direct-footer-meta-row"
+            width="100%"
+            flexDirection="row"
+            gap={1}
+            paddingLeft={2}
+            flexShrink={0}
+            paddingTop={1}
+          >
             <text id="run-direct-footer-agent" fg={theme().highlight} wrapMode="none" truncate flexShrink={0}>
               {props.agent}
             </text>
@@ -209,6 +229,7 @@ export function RunFooterView(props: RunFooterViewProps) {
         height={1}
         border={["left"]}
         borderColor={theme().highlight}
+        backgroundColor="transparent"
         customBorderChars={{
           ...EMPTY_BORDER,
           vertical: "╹",
@@ -220,7 +241,8 @@ export function RunFooterView(props: RunFooterViewProps) {
           width="100%"
           height={1}
           border={["bottom"]}
-          borderColor={theme().line}
+          borderColor={theme().surface}
+          backgroundColor={menu() ? theme().shade : "transparent"}
           customBorderChars={{
             ...EMPTY_BORDER,
             horizontal: "▀",
@@ -228,79 +250,86 @@ export function RunFooterView(props: RunFooterViewProps) {
         />
       </box>
 
-      <box
-        id="run-direct-footer-row"
-        width="100%"
-        height={1}
-        flexDirection="row"
-        justifyContent="space-between"
-        gap={1}
-        flexShrink={0}
-      >
-        <Show when={busy() || exiting()}>
-          <box id="run-direct-footer-hint-left" flexDirection="row" gap={1} flexShrink={0}>
-            <Show when={exiting()}>
-              <text id="run-direct-footer-hint-exit" fg={theme().highlight} wrapMode="none" truncate marginLeft={1}>
-                Press Ctrl-c again to exit
-              </text>
-            </Show>
+      <Show
+        when={menu()}
+        fallback={
+          <box
+            id="run-direct-footer-row"
+            width="100%"
+            height={1}
+            flexDirection="row"
+            justifyContent="space-between"
+            gap={1}
+            flexShrink={0}
+          >
+            <Show when={busy() || exiting()}>
+              <box id="run-direct-footer-hint-left" flexDirection="row" gap={1} flexShrink={0}>
+                <Show when={exiting()}>
+                  <text id="run-direct-footer-hint-exit" fg={theme().highlight} wrapMode="none" truncate marginLeft={1}>
+                    Press Ctrl-c again to exit
+                  </text>
+                </Show>
 
-            <Show when={busy() && !exiting()}>
-              <box id="run-direct-footer-status-spinner" marginLeft={1} flexShrink={0}>
-                <spinner color={spin().color} frames={spin().frames} interval={40} />
+                <Show when={busy() && !exiting()}>
+                  <box id="run-direct-footer-status-spinner" marginLeft={1} flexShrink={0}>
+                    <spinner color={spin().color} frames={spin().frames} interval={40} />
+                  </box>
+
+                  <text
+                    id="run-direct-footer-hint-interrupt"
+                    fg={armed() ? theme().highlight : theme().text}
+                    wrapMode="none"
+                    truncate
+                  >
+                    {interruptKey()}{" "}
+                    <span style={{ fg: armed() ? theme().highlight : theme().muted }}>
+                      {armed() ? "again to interrupt" : "interrupt"}
+                    </span>
+                  </text>
+                </Show>
               </box>
-
-              <text
-                id="run-direct-footer-hint-interrupt"
-                fg={armed() ? theme().highlight : theme().text}
-                wrapMode="none"
-                truncate
-              >
-                {interruptKey()}{" "}
-                <span style={{ fg: armed() ? theme().highlight : theme().muted }}>
-                  {armed() ? "again to interrupt" : "interrupt"}
-                </span>
-              </text>
             </Show>
-          </box>
-        </Show>
 
-        <Show when={!busy() && !exiting() && duration().length > 0}>
-          <box id="run-direct-footer-duration" flexDirection="row" gap={2} flexShrink={0} marginLeft={1}>
-            <text id="run-direct-footer-duration-mark" fg={theme().muted} wrapMode="none" truncate>
-              ▣
-            </text>
-            <box id="run-direct-footer-duration-tail" flexDirection="row" gap={1} flexShrink={0}>
-              <text id="run-direct-footer-duration-dot" fg={theme().muted} wrapMode="none" truncate>
-                ·
-              </text>
-              <text id="run-direct-footer-duration-value" fg={theme().muted} wrapMode="none" truncate>
-                {duration()}
-              </text>
+            <Show when={!busy() && !exiting() && duration().length > 0}>
+              <box id="run-direct-footer-duration" flexDirection="row" gap={2} flexShrink={0} marginLeft={1}>
+                <text id="run-direct-footer-duration-mark" fg={theme().muted} wrapMode="none" truncate>
+                  ▣
+                </text>
+                <box id="run-direct-footer-duration-tail" flexDirection="row" gap={1} flexShrink={0}>
+                  <text id="run-direct-footer-duration-dot" fg={theme().muted} wrapMode="none" truncate>
+                    ·
+                  </text>
+                  <text id="run-direct-footer-duration-value" fg={theme().muted} wrapMode="none" truncate>
+                    {duration()}
+                  </text>
+                </box>
+              </box>
+            </Show>
+
+            <box id="run-direct-footer-spacer" flexGrow={1} flexShrink={1} backgroundColor="transparent" />
+
+            <box id="run-direct-footer-hint-group" flexDirection="row" gap={2} flexShrink={0} justifyContent="flex-end">
+              <Show when={queue() > 0}>
+                <text id="run-direct-footer-queue" fg={theme().muted} wrapMode="none" truncate>
+                  {queue()} queued
+                </text>
+              </Show>
+              <Show when={usage().length > 0}>
+                <text id="run-direct-footer-usage" fg={theme().muted} wrapMode="none" truncate>
+                  {usage()}
+                </text>
+              </Show>
+              <Show when={variant().length > 0 && hints().variant}>
+                <text id="run-direct-footer-hint-variant" fg={theme().muted} wrapMode="none" truncate>
+                  {variant()} variant
+                </text>
+              </Show>
             </box>
           </box>
-        </Show>
-
-        <box id="run-direct-footer-spacer" flexGrow={1} flexShrink={1} backgroundColor="transparent" />
-
-        <box id="run-direct-footer-hint-group" flexDirection="row" gap={2} flexShrink={0} justifyContent="flex-end">
-          <Show when={queue() > 0}>
-            <text id="run-direct-footer-queue" fg={theme().muted} wrapMode="none" truncate>
-              {queue()} queued
-            </text>
-          </Show>
-          <Show when={usage().length > 0}>
-            <text id="run-direct-footer-usage" fg={theme().muted} wrapMode="none" truncate>
-              {usage()}
-            </text>
-          </Show>
-          <Show when={variant().length > 0 && hints().variant}>
-            <text id="run-direct-footer-hint-variant" fg={theme().muted} wrapMode="none" truncate>
-              {variant()} variant
-            </text>
-          </Show>
-        </box>
-      </box>
+        }
+      >
+        <RunPromptAutocomplete theme={theme} options={composer.options} selected={composer.selected} />
+      </Show>
     </box>
   )
 }

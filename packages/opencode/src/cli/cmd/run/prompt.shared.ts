@@ -13,12 +13,12 @@
 // arms the leader, second press within the timeout fires the action.
 import type { KeyBinding } from "@opentui/core"
 import { Keybind } from "../../../util/keybind"
-import type { FooterKeybinds } from "./types"
+import type { FooterKeybinds, RunPrompt } from "./types"
 
 const HISTORY_LIMIT = 200
 
 export type PromptHistoryState = {
-  items: string[]
+  items: RunPrompt[]
   index: number | null
   draft: string
 }
@@ -44,6 +44,17 @@ export type PromptMove = {
   text?: string
   cursor?: number
   apply: boolean
+}
+
+function copy(prompt: RunPrompt): RunPrompt {
+  return {
+    text: prompt.text,
+    parts: structuredClone(prompt.parts),
+  }
+}
+
+function same(a: RunPrompt, b: RunPrompt): boolean {
+  return a.text === b.text && JSON.stringify(a.parts) === JSON.stringify(b.parts)
 }
 
 function mapInputBindings(binding: string, action: "submit" | "newline"): KeyBinding[] {
@@ -159,24 +170,31 @@ export function promptCycle(
   }
 }
 
-export function createPromptHistory(items?: string[]): PromptHistoryState {
+export function createPromptHistory(items?: RunPrompt[]): PromptHistoryState {
+  const list = (items ?? []).filter((item) => item.text.trim().length > 0).map(copy)
+  const next: RunPrompt[] = []
+  for (const item of list) {
+    if (next.length > 0 && same(next[next.length - 1], item)) {
+      continue
+    }
+
+    next.push(item)
+  }
+
   return {
-    items: (items ?? [])
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0)
-      .filter((item, idx, all) => idx === 0 || item !== all[idx - 1])
-      .slice(-HISTORY_LIMIT),
+    items: next.slice(-HISTORY_LIMIT),
     index: null,
     draft: "",
   }
 }
 
-export function pushPromptHistory(state: PromptHistoryState, text: string): PromptHistoryState {
-  if (!text) {
+export function pushPromptHistory(state: PromptHistoryState, prompt: RunPrompt): PromptHistoryState {
+  if (!prompt.text.trim()) {
     return state
   }
 
-  if (state.items[state.items.length - 1] === text) {
+  const next = copy(prompt)
+  if (state.items[state.items.length - 1] && same(state.items[state.items.length - 1], next)) {
     return {
       ...state,
       index: null,
@@ -184,7 +202,7 @@ export function pushPromptHistory(state: PromptHistoryState, text: string): Prom
     }
   }
 
-  const items = [...state.items, text].slice(-HISTORY_LIMIT)
+  const items = [...state.items, next].slice(-HISTORY_LIMIT)
   return {
     ...state,
     items,
@@ -218,7 +236,7 @@ export function movePromptHistory(state: PromptHistoryState, dir: -1 | 1, text: 
         index: idx,
         draft: text,
       },
-      text: state.items[idx],
+      text: state.items[idx].text,
       cursor: 0,
       apply: true,
     }
@@ -246,8 +264,8 @@ export function movePromptHistory(state: PromptHistoryState, dir: -1 | 1, text: 
       ...state,
       index: idx,
     },
-    text: state.items[idx],
-    cursor: dir === -1 ? 0 : state.items[idx].length,
+    text: state.items[idx].text,
+    cursor: dir === -1 ? 0 : state.items[idx].text.length,
     apply: true,
   }
 }

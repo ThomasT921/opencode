@@ -3,14 +3,16 @@
 // Fetches session messages from the SDK and extracts user turn text for
 // the prompt history ring. Also finds the most recently used variant for
 // the current model so the footer can pre-select it.
-import type { RunInput } from "./types"
+import path from "path"
+import { fileURLToPath } from "url"
+import type { RunInput, RunPrompt } from "./types"
 
 const LIMIT = 200
 
 export type SessionMessages = NonNullable<Awaited<ReturnType<RunInput["sdk"]["session"]["messages"]>>["data"]>
 
 type Turn = {
-  text: string
+  prompt: RunPrompt
   provider: string | undefined
   model: string | undefined
   variant: string | undefined
@@ -21,12 +23,108 @@ export type RunSession = {
   turns: Turn[]
 }
 
-function text(msg: SessionMessages[number]): string {
-  return msg.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text.trim())
-    .filter((part) => part.length > 0)
-    .join("\n")
+function copy(prompt: RunPrompt): RunPrompt {
+  return {
+    text: prompt.text,
+    parts: structuredClone(prompt.parts),
+  }
+}
+
+function same(a: RunPrompt, b: RunPrompt): boolean {
+  return a.text === b.text && JSON.stringify(a.parts) === JSON.stringify(b.parts)
+}
+
+function fileName(url: string, filename?: string) {
+  if (filename) {
+    return filename
+  }
+
+  try {
+    const next = new URL(url)
+    if (next.protocol === "file:") {
+      return path.basename(fileURLToPath(next)) || url
+    }
+  } catch {}
+
+  return url
+}
+
+function fileSource(
+  part: Extract<SessionMessages[number]["parts"][number], { type: "file" }>,
+  text: { start: number; end: number; value: string },
+) {
+  if (part.source) {
+    return {
+      ...structuredClone(part.source),
+      text,
+    }
+  }
+
+  return {
+    type: "file" as const,
+    path: part.filename ?? part.url,
+    text,
+  }
+}
+
+function prompt(msg: SessionMessages[number]): RunPrompt {
+  const files: Array<Extract<SessionMessages[number]["parts"][number], { type: "file" }>> = []
+  const parts: RunPrompt["parts"] = []
+  for (const part of msg.parts) {
+    if (part.type === "file") {
+      if (!part.source?.text) {
+        files.push(part)
+        continue
+      }
+
+      parts.push({
+        type: "file",
+        mime: part.mime,
+        filename: part.filename,
+        url: part.url,
+        source: structuredClone(part.source),
+      })
+      continue
+    }
+
+    if (part.type === "agent" && part.source) {
+      parts.push({
+        type: "agent",
+        name: part.name,
+        source: structuredClone(part.source),
+      })
+    }
+  }
+
+  let text = msg.parts
+    .filter((part): part is Extract<SessionMessages[number]["parts"][number], { type: "text" }> => {
+      return part.type === "text" && !part.synthetic
+    })
+    .map((part) => part.text)
+    .join("")
+  let cursor = Bun.stringWidth(text)
+
+  for (const part of files) {
+    const value = "@" + fileName(part.url, part.filename)
+    const gap = text ? " " : ""
+    const start = cursor + Bun.stringWidth(gap)
+    text += gap + value
+    const end = start + Bun.stringWidth(value)
+    cursor = end
+    parts.push({
+      type: "file",
+      mime: part.mime,
+      filename: part.filename,
+      url: part.url,
+      source: fileSource(part, {
+        start,
+        end,
+        value,
+      }),
+    })
+  }
+
+  return { text, parts }
 }
 
 function turn(msg: SessionMessages[number]): Turn | undefined {
@@ -35,10 +133,10 @@ function turn(msg: SessionMessages[number]): Turn | undefined {
   }
 
   return {
-    text: text(msg),
+    prompt: prompt(msg),
     provider: msg.info.model.providerID,
     model: msg.info.model.modelID,
-    variant: msg.info.variant,
+    variant: msg.info.model.variant,
   }
 }
 
@@ -60,19 +158,19 @@ export async function resolveSession(sdk: RunInput["sdk"], sessionID: string, li
   return createSession(response.data ?? [])
 }
 
-export function sessionHistory(session: RunSession, limit = LIMIT): string[] {
-  const out: string[] = []
+export function sessionHistory(session: RunSession, limit = LIMIT): RunPrompt[] {
+  const out: RunPrompt[] = []
 
   for (const turn of session.turns) {
-    if (!turn.text) {
+    if (!turn.prompt.text.trim()) {
       continue
     }
 
-    if (out[out.length - 1] === turn.text) {
+    if (out[out.length - 1] && same(out[out.length - 1], turn.prompt)) {
       continue
     }
 
-    out.push(turn.text)
+    out.push(copy(turn.prompt))
   }
 
   return out.slice(-limit)

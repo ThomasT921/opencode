@@ -27,8 +27,10 @@ export type RunFooterTheme = {
   error: ColorInput
   muted: ColorInput
   text: ColorInput
+  shade: ColorInput
   surface: ColorInput
   pane: ColorInput
+  border: ColorInput
   line: ColorInput
 }
 
@@ -99,6 +101,7 @@ function fade(color: RGBA, base: RGBA, fallback: number, scale: number, limit: n
 function map(theme: TuiThemeCurrent, syntax?: SyntaxStyle): RunTheme {
   const bg = theme.background
   const pane = theme.backgroundElement
+  const shade = fade(pane, bg, 0.12, 0.56, 0.72)
   const surface = fade(pane, bg, 0.18, 0.76, 0.9)
   const line = fade(pane, bg, 0.24, 0.9, 0.98)
 
@@ -111,8 +114,10 @@ function map(theme: TuiThemeCurrent, syntax?: SyntaxStyle): RunTheme {
       error: theme.error,
       muted: theme.textMuted,
       text: theme.text,
+      shade,
       surface,
       pane,
+      border: theme.border,
       line,
     },
     entry: {
@@ -180,8 +185,10 @@ export const RUN_THEME_FALLBACK: RunTheme = {
     error: seed.error,
     muted: seed.muted,
     text: seed.text,
+    shade: alpha(seed.panel, 0.68),
     surface: alpha(seed.panel, 0.86),
     pane: seed.panel,
+    border: seed.muted,
     line: alpha(seed.panel, 0.96),
   },
   entry: {

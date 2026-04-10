@@ -7,7 +7,7 @@
 // none block each other.
 import { TuiConfig } from "../../../config/tui"
 import { resolveSession, sessionHistory } from "./session.shared"
-import type { FooterKeybinds, RunDiffStyle, RunInput } from "./types"
+import type { FooterKeybinds, RunDiffStyle, RunInput, RunPrompt } from "./types"
 import { pickVariant } from "./variant.shared"
 
 const DEFAULT_KEYBINDS: FooterKeybinds = {
@@ -27,7 +27,7 @@ export type ModelInfo = {
 
 export type SessionInfo = {
   first: boolean
-  history: string[]
+  history: RunPrompt[]
   variant: string | undefined
 }
 

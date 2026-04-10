@@ -15,7 +15,7 @@
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2"
 import { createSessionData, flushInterrupted, reduceSessionData } from "./session-data"
 import { writeSessionOutput } from "./stream"
-import type { FooterApi, RunFilePart, RunInput, StreamCommit } from "./types"
+import type { FooterApi, RunFilePart, RunInput, RunPrompt, StreamCommit } from "./types"
 
 type Trace = {
   write(type: string, data?: unknown): void
@@ -43,7 +43,7 @@ export type SessionTurnInput = {
   agent: string | undefined
   model: RunInput["model"]
   variant: string | undefined
-  prompt: string
+  prompt: RunPrompt
   files: RunFilePart[]
   includeFiles: boolean
   signal?: AbortSignal
@@ -281,7 +281,11 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
         agent: next.agent,
         model: next.model,
         variant: next.variant,
-        parts: [...(next.includeFiles ? next.files : []), { type: "text" as const, text: next.prompt }],
+        parts: [
+          ...(next.includeFiles ? next.files : []),
+          { type: "text" as const, text: next.prompt.text },
+          ...next.prompt.parts,
+        ],
       }
       input.trace?.write("send.prompt", req)
       await input.sdk.session.prompt(req, {
