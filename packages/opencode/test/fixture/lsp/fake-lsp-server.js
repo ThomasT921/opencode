@@ -1,7 +1,27 @@
 // Simple JSON-RPC 2.0 LSP-like fake server over stdio
 // Implements a minimal LSP handshake and triggers a request upon notification
 
+const fs = require("fs")
 const net = require("net")
+
+const mark = process.argv[2]
+
+function writeMark() {
+  if (!mark) return
+  try {
+    fs.writeFileSync(mark, "exit")
+  } catch {}
+}
+
+process.on("exit", writeMark)
+process.on("SIGTERM", () => {
+  writeMark()
+  process.exit(0)
+})
+process.on("SIGINT", () => {
+  writeMark()
+  process.exit(0)
+})
 
 let nextId = 1
 

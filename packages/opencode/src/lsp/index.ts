@@ -14,6 +14,7 @@ import { spawn as lspspawn } from "./launch"
 import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { Filesystem } from "@/util/filesystem"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -226,6 +227,7 @@ export namespace LSP {
 
       const getClients = Effect.fnUntraced(function* (file: string) {
         if (!Instance.containsPath(file)) return [] as LSPClient.Info[]
+        yield* trim()
         const s = yield* InstanceState.get(state)
         return yield* Effect.promise(async () => {
           const extension = path.parse(file).ext || file
@@ -316,7 +318,26 @@ export namespace LSP {
         return yield* Effect.promise(() => Promise.all(clients.map((x) => fn(x))))
       })
 
+      const trim = Effect.fnUntraced(function* () {
+        const s = yield* InstanceState.get(state)
+        const dead = yield* Effect.promise(async () => {
+          const dead = (
+            await Promise.all(
+              s.clients.map(async (client) => ((await Filesystem.exists(client.root)) ? undefined : client)),
+            )
+          ).filter((client): client is LSPClient.Info => Boolean(client))
+          if (!dead.length) return [] as LSPClient.Info[]
+
+          const ids = new Set(dead.map((client) => `${client.serverID}:${client.root}`))
+          s.clients = s.clients.filter((client) => !ids.has(`${client.serverID}:${client.root}`))
+          await Promise.all(dead.map((client) => client.shutdown().catch(() => undefined)))
+          return dead
+        })
+        if (dead.length) Bus.publish(Event.Updated, {})
+      })
+
       const runAll = Effect.fnUntraced(function* <T>(fn: (client: LSPClient.Info) => Promise<T>) {
+        yield* trim()
         const s = yield* InstanceState.get(state)
         return yield* Effect.promise(() => Promise.all(s.clients.map((x) => fn(x))))
       })
@@ -326,6 +347,7 @@ export namespace LSP {
       })
 
       const status = Effect.fn("LSP.status")(function* () {
+        yield* trim()
         const s = yield* InstanceState.get(state)
         const result: Status[] = []
         for (const client of s.clients) {
