@@ -42,13 +42,15 @@ const layer = Config.layer.pipe(
 
 const it = testEffect(layer)
 
-const run = <A, E, R>(eff: Effect.Effect<A, E, R>) => Effect.runPromise(eff.pipe(Effect.scoped, Effect.provide(layer)))
-
-const load = () => run(Config.Service.use((svc) => svc.get()))
-const save = (config: Config.Info) => run(Config.Service.use((svc) => svc.update(config)))
-const clear = (wait = false) => run(Config.Service.use((svc) => svc.invalidate(wait)))
-const listDirs = () => run(Config.Service.use((svc) => svc.directories()))
-const ready = () => run(Config.Service.use((svc) => svc.waitForDependencies()))
+const load = () => Effect.runPromise(Config.Service.use((svc) => svc.get()).pipe(Effect.scoped, Effect.provide(layer)))
+const save = (config: Config.Info) =>
+  Effect.runPromise(Config.Service.use((svc) => svc.update(config)).pipe(Effect.scoped, Effect.provide(layer)))
+const clear = (wait = false) =>
+  Effect.runPromise(Config.Service.use((svc) => svc.invalidate(wait)).pipe(Effect.scoped, Effect.provide(layer)))
+const listDirs = () =>
+  Effect.runPromise(Config.Service.use((svc) => svc.directories()).pipe(Effect.scoped, Effect.provide(layer)))
+const ready = () =>
+  Effect.runPromise(Config.Service.use((svc) => svc.waitForDependencies()).pipe(Effect.scoped, Effect.provide(layer)))
 
 const installDeps = (dir: string, input?: Config.InstallInput) =>
   Config.Service.use((svc) => svc.installDependencies(dir, input))
