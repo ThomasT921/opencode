@@ -272,12 +272,23 @@ The first slice is successful if:
 - OpenAPI is generated from the `HttpApi` contract
 - the tests are straightforward enough that the next slice feels mechanical
 
-## Proposed first steps
+## Learnings from the question slice
 
-- [ ] add one small spike that defines an `HttpApi` group for a simple JSON route set
-- [ ] use Effect Schema request / response types for that slice
-- [ ] keep the underlying service calls identical to the current handlers
-- [ ] compare generated OpenAPI against the current Hono/OpenAPI setup
+The first parallel `question` spike gave us a concrete pattern to reuse.
+
+- `Schema.Class` works well for route DTOs such as `Question.Request`, `Question.Info`, and `Question.Reply`.
+- scalar or collection schemas such as `Question.Answer` should stay as schemas and use helpers like `withStatics(...)` instead of being forced into classes.
+- if an `HttpApi` success schema uses `Schema.Class`, the handler or underlying service needs to return real schema instances rather than plain objects.
+- internal event payloads can stay anonymous when we want to avoid adding extra named OpenAPI component churn for non-route shapes.
+- the experimental slice should stay mounted in parallel and keep calling the existing service layer unchanged.
+- compare generated OpenAPI semantically at the route and schema level; in the current setup the exported OpenAPI paths do not include the outer Hono mount prefix.
+
+## Checklist
+
+- [x] add one small spike that defines an `HttpApi` group for a simple JSON route set
+- [x] use Effect Schema request / response types for that slice
+- [x] keep the underlying service calls identical to the current handlers
+- [x] compare generated OpenAPI against the current Hono/OpenAPI setup
 - [ ] document how auth, instance lookup, and error mapping would compose in the new stack
 - [ ] decide after the spike whether `HttpApi` should stay parallel, replace only some groups, or become the long-term default
 
