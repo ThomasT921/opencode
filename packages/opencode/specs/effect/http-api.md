@@ -327,13 +327,64 @@ The first parallel `question` spike gave us a concrete pattern to reuse.
 - the experimental slice should stay mounted in parallel and keep calling the existing service layer unchanged.
 - compare generated OpenAPI semantically at the route and schema level; in the current setup the exported OpenAPI paths do not include the outer Hono mount prefix.
 
+## Route inventory
+
+Status legend:
+
+- `done` - parallel `HttpApi` slice exists
+- `next` - good near-term candidate
+- `later` - possible, but not first wave
+- `defer` - not a good early `HttpApi` target
+
+Current instance route inventory:
+
+- `question` - `done`
+  endpoints in slice: `GET /question`, `POST /question/:requestID/reply`
+- `permission` - `done`
+  endpoints in slice: `GET /permission`, `POST /permission/:requestID/reply`
+- `provider` - `next`
+  best next endpoint: `GET /provider/auth`
+  later endpoint: `GET /provider`
+  defer first-wave OAuth mutations
+- `config` - `next`
+  best next endpoint: `GET /config/providers`
+  later endpoint: `GET /config`
+  defer `PATCH /config` for now
+- `project` - `later`
+  best small reads: `GET /project`, `GET /project/current`
+  defer git-init mutation first
+- `workspace` - `later`
+  best small reads: `GET /experimental/workspace/adaptor`, `GET /experimental/workspace`, `GET /experimental/workspace/status`
+  defer create/remove mutations first
+- `file` - `later`
+  good JSON-only candidate set, but larger than the current first-wave slices
+- `mcp` - `later`
+  has JSON-only endpoints, but interactive OAuth/auth flows make it a worse early fit
+- `session` - `defer`
+  large, stateful, mixes CRUD with prompt/shell/command/share/revert flows and a streaming route
+- `event` - `defer`
+  SSE only
+- `global` - `defer`
+  mixed bag with SSE and process-level side effects
+- `pty` - `defer`
+  websocket-heavy route surface
+- `tui` - `defer`
+  queue-style UI bridge, weak early `HttpApi` fit
+
+Recommended near-term sequence after the first spike:
+
+1. `provider` auth read endpoint
+2. `config` providers read endpoint
+3. `project` read endpoints
+4. `workspace` read endpoints
+
 ## Checklist
 
 - [x] add one small spike that defines an `HttpApi` group for a simple JSON route set
 - [x] use Effect Schema request / response types for that slice
 - [x] keep the underlying service calls identical to the current handlers
 - [x] compare generated OpenAPI against the current Hono/OpenAPI setup
-- [ ] document how auth, instance lookup, and error mapping would compose in the new stack
+- [x] document how auth, instance lookup, and error mapping would compose in the new stack
 - [ ] decide after the spike whether `HttpApi` should stay parallel, replace only some groups, or become the long-term default
 
 ## Rule of thumb
