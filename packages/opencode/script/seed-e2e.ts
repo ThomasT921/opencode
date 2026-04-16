@@ -58,3 +58,8 @@ const seed = async () => {
 }
 
 await seed()
+// Force-exit: BootstrapRuntime and per-service ManagedRuntime instances
+// (created via the shared memoMap during InstanceBootstrap) hold scoped
+// resources that keep the event loop alive even after Instance.disposeAll().
+// The seed script only writes data, so an explicit exit is safe.
+process.exit(0)
