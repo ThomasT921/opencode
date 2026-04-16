@@ -2,7 +2,7 @@ import z from "zod"
 import { Effect } from "effect"
 import { Tool } from "./tool"
 import DESCRIPTION_WRITE from "./todowrite.txt"
-import { Todo } from "../session/todo"
+import { Todo } from "../session"
 
 const parameters = z.object({
   todos: z.array(z.object(Todo.Info.shape)).describe("The updated todo list"),

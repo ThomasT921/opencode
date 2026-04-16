@@ -1,7 +1,7 @@
 import { NotFoundError, eq, and } from "../storage/db"
 import { SyncEvent } from "@/sync"
 import { Session } from "."
-import { MessageV2 } from "./message-v2"
+import { MessageV2 } from "."
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { Log } from "../util/log"
 

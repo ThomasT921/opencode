@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { Effect, Layer } from "effect"
 import { Session } from "../../src/session"
-import { SessionPrompt } from "../../src/session/prompt"
+import { SessionPrompt } from "../../src/session"
 import { Log } from "../../src/util/log"
 import { Instance } from "../../src/project/instance"
-import { MessageV2 } from "../../src/session/message-v2"
+import { MessageV2 } from "../../src/session"
 
 const projectRoot = path.join(__dirname, "../..")
 Log.init({ print: false })

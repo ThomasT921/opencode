@@ -85,7 +85,7 @@ import { useTuiConfig } from "../../context/tui-config"
 import { getScrollAcceleration } from "../../util/scroll"
 import { TuiPluginRuntime } from "../../plugin"
 import { DialogGoUpsell } from "../../component/dialog-go-upsell"
-import { SessionRetry } from "@/session/retry"
+import { SessionRetry } from "@/session"
 
 addDefaultParsers(parsers.parsers)
 

@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core"
 import { ProjectTable } from "../project/project.sql"
-import type { MessageV2 } from "./message-v2"
+import type { MessageV2 } from "."
 import type { SessionEntry } from "../v2/session-entry"
 import type { Snapshot } from "../snapshot"
 import type { Permission } from "../permission"

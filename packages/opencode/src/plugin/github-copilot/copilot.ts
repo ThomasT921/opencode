@@ -5,7 +5,7 @@ import { iife } from "@/util/iife"
 import { Log } from "../../util/log"
 import { setTimeout as sleep } from "node:timers/promises"
 import { CopilotModels } from "./models"
-import { MessageV2 } from "@/session/message-v2"
+import { MessageV2 } from "@/session"
 
 const log = Log.create({ service: "plugin.copilot" })
 
