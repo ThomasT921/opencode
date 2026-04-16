@@ -244,8 +244,22 @@ export const layer = Layer.effect(
         }
 
         async function schedule(server: LSPServer.Info, root: string, key: string) {
-          const handle = await runSpawn(server, root)
+          // Bound server.spawn so an unresponsive provisioning step
+          // (e.g. pyright's Npm.which → arborist.reify with no network)
+          // cannot hang touchFile forever. A 10s budget is generous for
+          // a cold start and an eternity for a wedged one. See #22872.
+          const SPAWN_TIMEOUT_MS = 10_000
+          let spawnTimer: ReturnType<typeof setTimeout> | undefined
+          const timeoutP = new Promise<"__lsp_spawn_timeout__">((resolve) => {
+            spawnTimer = setTimeout(() => resolve("__lsp_spawn_timeout__"), SPAWN_TIMEOUT_MS)
+          })
+          const handle = await Promise.race([runSpawn(server, root), timeoutP])
             .then((value) => {
+              if (value === "__lsp_spawn_timeout__") {
+                s.broken.add(key)
+                log.error(`LSP server ${server.id} spawn timed out after ${SPAWN_TIMEOUT_MS}ms`, { root })
+                return undefined
+              }
               if (!value) s.broken.add(key)
               return value
             })
@@ -253,6 +267,9 @@ export const layer = Layer.effect(
               s.broken.add(key)
               log.error(`Failed to spawn LSP server ${server.id}`, { error: err })
               return undefined
+            })
+            .finally(() => {
+              if (spawnTimer) clearTimeout(spawnTimer)
             })
 
           if (!handle) return undefined

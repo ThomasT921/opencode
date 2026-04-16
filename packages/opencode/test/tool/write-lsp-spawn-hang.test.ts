@@ -112,9 +112,10 @@ describe("tool.write (LSP spawn hang — issue #22872 forever branch)", () => {
           expect(content).toBe("print('hi')")
           expect(result.output).toContain("Wrote file successfully")
 
-          // The LSP spawn path is now blocked forever (Npm.Service.which
-          // returns Effect.never). The write tool must not wait on it.
-          expect(elapsed).toBeLessThan(10_000)
+          // The LSP spawn path is blocked forever (Npm.Service.which
+          // returns Effect.never). The write tool's 5s enrichment
+          // timeout must win, so the tool returns within roughly 5s.
+          expect(elapsed).toBeLessThan(7_000)
         }),
       ),
     15_000,

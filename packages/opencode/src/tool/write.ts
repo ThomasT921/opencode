@@ -1,8 +1,9 @@
 import z from "zod"
 import * as path from "path"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import * as Tool from "./tool"
 import { LSP } from "../lsp"
+import type * as LSPClient from "../lsp/client"
 import { createTwoFilesPatch } from "diff"
 import DESCRIPTION from "./write.txt"
 import { Bus } from "../bus"
@@ -64,8 +65,19 @@ export const WriteTool = Tool.define(
           yield* filetime.read(ctx.sessionID, filepath)
 
           let output = "Wrote file successfully."
-          yield* lsp.touchFile(filepath, true)
-          const diagnostics = yield* lsp.diagnostics()
+          // LSP diagnostic enrichment is best-effort. If the LSP server is
+          // slow to spawn, slow to initialize, or wedged entirely (e.g. a
+          // pyright install hanging on network in a sandboxed container)
+          // we must not block the tool's return on it — the file is
+          // already on disk. Bound at 5s and fall back to an empty
+          // diagnostics set. See issue #22872.
+          const diagnostics = yield* Effect.gen(function* () {
+            yield* lsp.touchFile(filepath, true)
+            return yield* lsp.diagnostics()
+          }).pipe(
+            Effect.timeout(Duration.seconds(5)),
+            Effect.catch(() => Effect.succeed({} as Record<string, LSPClient.Diagnostic[]>)),
+          )
           const normalizedFilepath = AppFileSystem.normalizePath(filepath)
           let projectDiagnosticsCount = 0
           for (const [file, issues] of Object.entries(diagnostics)) {

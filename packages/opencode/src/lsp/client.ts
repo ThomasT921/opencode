@@ -113,7 +113,13 @@ export async function create(input: { serverID: string; server: LSPServer.Handle
         },
       },
     }),
-    45_000,
+    // 10s budget for LSP `initialize`. Previously 45s, which is far
+    // longer than a healthy server needs and effectively froze tools
+    // that await this path (e.g. write → lsp.touchFile). Servers that
+    // genuinely need more time for first-boot indexing publish their
+    // progress via window/workDoneProgress after initialize returns.
+    // See issue #22872.
+    10_000,
   ).catch((err) => {
     l.error("initialize error", { error: err })
     throw new InitializeError(

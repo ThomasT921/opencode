@@ -84,9 +84,11 @@ describe("tool.write (LSP hang — issue #22872)", () => {
             expect(content).toBe("print('hi')")
             expect(result.output).toContain("Wrote file successfully")
 
-            // Regression guard: touchFile/diagnostics must not block the tool
-            // on the 45s LSPClient.create initialize timeout.
-            expect(elapsed).toBeLessThan(10_000)
+            // Regression guard: touchFile/diagnostics must not block the
+            // tool on the LSP initialize timeout. The write tool wraps
+            // its enrichment tail in a 5s Effect.timeout, so the tool
+            // must return within roughly 5s regardless of LSP state.
+            expect(elapsed).toBeLessThan(7_000)
           }),
         {
           config: {

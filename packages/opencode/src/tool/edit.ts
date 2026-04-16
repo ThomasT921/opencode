@@ -5,9 +5,10 @@
 
 import z from "zod"
 import * as path from "path"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import * as Tool from "./tool"
 import { LSP } from "../lsp"
+import type * as LSPClient from "../lsp/client"
 import { createTwoFilesPatch, diffLines } from "diff"
 import DESCRIPTION from "./edit.txt"
 import { File } from "../file"
@@ -166,8 +167,15 @@ export const EditTool = Tool.define(
           })
 
           let output = "Edit applied successfully."
-          yield* lsp.touchFile(filePath, true)
-          const diagnostics = yield* lsp.diagnostics()
+          // LSP diagnostic enrichment is best-effort; see write.ts for
+          // rationale. Never block the tool on a slow or wedged LSP.
+          const diagnostics = yield* Effect.gen(function* () {
+            yield* lsp.touchFile(filePath, true)
+            return yield* lsp.diagnostics()
+          }).pipe(
+            Effect.timeout(Duration.seconds(5)),
+            Effect.catch(() => Effect.succeed({} as Record<string, LSPClient.Diagnostic[]>)),
+          )
           const normalizedFilePath = AppFileSystem.normalizePath(filePath)
           const block = LSP.Diagnostic.report(filePath, diagnostics[normalizedFilePath] ?? [])
           if (block) output += `\n\nLSP errors detected in this file, please fix:\n${block}`

@@ -1,6 +1,7 @@
 import z from "zod"
 import * as path from "path"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
+import type * as LSPClient from "../lsp/client"
 import * as Tool from "./tool"
 import { Bus } from "../bus"
 import { FileWatcher } from "../file/watcher"
@@ -244,13 +245,21 @@ export const ApplyPatchTool = Tool.define(
         yield* bus.publish(FileWatcher.Event.Updated, update)
       }
 
-      // Notify LSP of file changes and collect diagnostics
-      for (const change of fileChanges) {
-        if (change.type === "delete") continue
-        const target = change.movePath ?? change.filePath
-        yield* lsp.touchFile(target, true)
-      }
-      const diagnostics = yield* lsp.diagnostics()
+      // Notify LSP of file changes and collect diagnostics. Best-effort;
+      // bounded at 5s total so a slow or wedged LSP cannot block the
+      // tool result after the patches have already been applied. See
+      // issue #22872 and write.ts for the same pattern.
+      const diagnostics = yield* Effect.gen(function* () {
+        for (const change of fileChanges) {
+          if (change.type === "delete") continue
+          const target = change.movePath ?? change.filePath
+          yield* lsp.touchFile(target, true)
+        }
+        return yield* lsp.diagnostics()
+      }).pipe(
+        Effect.timeout(Duration.seconds(5)),
+        Effect.catch(() => Effect.succeed({} as Record<string, LSPClient.Diagnostic[]>)),
+      )
 
       // Generate output summary
       const summaryLines = fileChanges.map((change) => {
