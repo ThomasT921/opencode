@@ -4,6 +4,7 @@ import path from "path"
 import { provideInstance, tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Agent } from "../../src/agent/agent"
+import { Global } from "../../src/global"
 import { Permission } from "../../src/permission"
 
 // Helper to evaluate permission for a tool with wildcard pattern
@@ -595,6 +596,21 @@ description: Permission skill.
   } finally {
     process.env.OPENCODE_TEST_HOME = home
   }
+})
+
+test("managed worktree directories are allowed for external_directory", async () => {
+  await using tmp = await tmpdir({ git: true })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const build = await load(tmp.path, (svc) => svc.get("build"))
+      const target = path.join(Global.Path.data, "worktree", String(Instance.project.id), "sandbox", "notes.md")
+      const other = path.join(Global.Path.data, "worktree", "proj_other", "sandbox", "notes.md")
+      expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
+      expect(Permission.evaluate("external_directory", other, build!.permission).action).toBe("ask")
+    },
+  })
 })
 
 test("defaultAgent returns build when no default_agent config", async () => {

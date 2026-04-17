@@ -79,10 +79,14 @@ export const layer = Layer.effect(
     const provider = yield* Provider.Service
 
     const state = yield* InstanceState.make<State>(
-      Effect.fn("Agent.state")(function* (_ctx) {
+      Effect.fn("Agent.state")(function* (ctx) {
         const cfg = yield* config.get()
         const skillDirs = yield* skill.dirs()
-        const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
+        const whitelistedDirs = [
+          Truncate.GLOB,
+          path.join(Global.Path.data, "worktree", String(ctx.project.id), "*"),
+          ...skillDirs.map((dir) => path.join(dir, "*")),
+        ]
 
         const defaults = Permission.fromConfig({
           "*": "allow",
