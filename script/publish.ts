@@ -12,30 +12,34 @@ const pkgjsons = await Array.fromAsync(
   }),
 ).then((arr) => arr.filter((x) => !x.includes("node_modules") && !x.includes("dist")))
 
-for (const file of pkgjsons) {
-  let pkg = await Bun.file(file).text()
-  pkg = pkg.replaceAll(/"version": "[^"]+"/g, `"version": "${Script.version}"`)
-  console.log("updated:", file)
-  await Bun.file(file).write(pkg)
+const extensionToml = fileURLToPath(new URL("../packages/extensions/zed/extension.toml", import.meta.url))
+
+async function prepareReleaseFiles() {
+  for (const file of pkgjsons) {
+    let pkg = await Bun.file(file).text()
+    pkg = pkg.replaceAll(/"version": "[^"]+"/g, `"version": "${Script.version}"`)
+    console.log("updated:", file)
+    await Bun.file(file).write(pkg)
+  }
+
+  let toml = await Bun.file(extensionToml).text()
+  toml = toml.replace(/^version = "[^"]+"/m, `version = "${Script.version}"`)
+  toml = toml.replaceAll(/releases\/download\/v[^/]+\//g, `releases/download/v${Script.version}/`)
+  console.log("updated:", extensionToml)
+  await Bun.file(extensionToml).write(toml)
+
+  await $`bun install`
+  await $`./packages/sdk/js/script/build.ts`
 }
 
-const extensionToml = fileURLToPath(new URL("../packages/extensions/zed/extension.toml", import.meta.url))
-let toml = await Bun.file(extensionToml).text()
-toml = toml.replace(/^version = "[^"]+"/m, `version = "${Script.version}"`)
-toml = toml.replaceAll(/releases\/download\/v[^/]+\//g, `releases/download/v${Script.version}/`)
-console.log("updated:", extensionToml)
-await Bun.file(extensionToml).write(toml)
-
-await $`bun install`
-await import(`../packages/sdk/js/script/build.ts`)
+await prepareReleaseFiles()
 
 if (Script.release) {
   if (!Script.preview) {
+    await $`git switch --detach`
     await $`git commit -am "release: v${Script.version}"`
-    await $`git tag v${Script.version}`
-    await $`git fetch origin`
-    await $`git cherry-pick HEAD..origin/dev`.nothrow()
-    await $`git push origin HEAD --tags --no-verify --force-with-lease`
+    await $`git tag -f v${Script.version}`
+    await $`git push origin refs/tags/v${Script.version} --force --no-verify`
     await new Promise((resolve) => setTimeout(resolve, 5_000))
   }
 
@@ -53,6 +57,14 @@ await import(`../packages/sdk/js/script/publish.ts`)
 
 console.log("\n=== plugin ===\n")
 await import(`../packages/plugin/script/publish.ts`)
+
+if (Script.release && !Script.preview) {
+  await $`git fetch origin`
+  await $`git checkout -B dev origin/dev`
+  await prepareReleaseFiles()
+  await $`git commit -am "sync release versions for v${Script.version}"`
+  await $`git push origin HEAD:dev --no-verify`
+}
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
 process.chdir(dir)
