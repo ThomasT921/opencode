@@ -6,6 +6,9 @@ import { fileURLToPath } from "url"
 
 console.log("=== publishing ===\n")
 
+const tag = `v${Script.version}`
+const release_commit = `release: ${tag}`
+
 const pkgjsons = await Array.fromAsync(
   new Bun.Glob("**/package.json").scan({
     absolute: true,
@@ -13,6 +16,16 @@ const pkgjsons = await Array.fromAsync(
 ).then((arr) => arr.filter((x) => !x.includes("node_modules") && !x.includes("dist")))
 
 const extensionToml = fileURLToPath(new URL("../packages/extensions/zed/extension.toml", import.meta.url))
+
+async function hasChanges() {
+  return (await $`git diff --quiet && git diff --cached --quiet`.nothrow()).exitCode !== 0
+}
+
+async function releaseTagReady() {
+  const ref = await $`git rev-parse -q --verify refs/tags/${tag}`.nothrow()
+  if (ref.exitCode !== 0) return false
+  return (await $`git log -1 --format=%s refs/tags/${tag}`.text()).trim() === release_commit
+}
 
 async function prepareReleaseFiles() {
   for (const file of pkgjsons) {
@@ -32,21 +45,24 @@ async function prepareReleaseFiles() {
   await $`./packages/sdk/js/script/build.ts`
 }
 
+if (Script.release && !Script.preview) {
+  await $`git fetch origin --tags`
+  if (await releaseTagReady()) await $`git switch --detach refs/tags/${tag}`
+  else await $`git switch --detach`
+}
+
 await prepareReleaseFiles()
 
-if (Script.release) {
-  if (!Script.preview) {
-    await $`git switch --detach`
-    await $`git commit -am "release: v${Script.version}"`
-    await $`git tag -f v${Script.version}`
-    await $`git push origin refs/tags/v${Script.version} --force --no-verify`
+if (Script.release && !Script.preview && !(await releaseTagReady())) {
+  await $`git commit -am ${release_commit}`
+  if ((await $`git rev-parse -q --verify refs/tags/${tag}`.nothrow()).exitCode === 0) {
+    await $`git tag -f ${tag}`
+    await $`git push origin refs/tags/${tag} --force --no-verify`
+  } else {
+    await $`git tag ${tag}`
+    await $`git push origin refs/tags/${tag} --no-verify`
     await new Promise((resolve) => setTimeout(resolve, 5_000))
   }
-
-  await import(`../packages/desktop/scripts/finalize-latest-json.ts`)
-  await import(`../packages/desktop-electron/scripts/finalize-latest-yml.ts`)
-
-  await $`gh release edit v${Script.version} --draft=false --repo ${process.env.GH_REPO}`
 }
 
 console.log("\n=== cli ===\n")
@@ -58,12 +74,25 @@ await import(`../packages/sdk/js/script/publish.ts`)
 console.log("\n=== plugin ===\n")
 await import(`../packages/plugin/script/publish.ts`)
 
+if (Script.release) {
+  await import(`../packages/desktop/scripts/finalize-latest-json.ts`)
+  await import(`../packages/desktop-electron/scripts/finalize-latest-yml.ts`)
+}
+
 if (Script.release && !Script.preview) {
   await $`git fetch origin`
   await $`git checkout -B dev origin/dev`
   await prepareReleaseFiles()
-  await $`git commit -am "sync release versions for v${Script.version}"`
-  await $`git push origin HEAD:dev --no-verify`
+  if (await hasChanges()) {
+    await $`git commit -am "sync release versions for v${Script.version}"`
+    await $`git push origin HEAD:dev --no-verify`
+  } else {
+    console.log(`dev already synced for ${tag}`)
+  }
+}
+
+if (Script.release) {
+  await $`gh release edit ${tag} --draft=false --repo ${process.env.GH_REPO}`
 }
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
