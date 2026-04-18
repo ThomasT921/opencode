@@ -51,6 +51,11 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
   if (target.instructions && source.instructions) {
     merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
   }
+  // Accumulate permission layers for later merging as rulesets
+  // This preserves the ordering semantics: later rules override earlier rules
+  if (source.permission) {
+    merged.permission_layers = [...(target.permission_layers ?? []), source.permission]
+  }
   return merged
 }
 
@@ -190,6 +195,9 @@ export const InfoSchema = Schema.Struct({
   }),
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(PermissionRef),
+  permission_layers: Schema.optional(Schema.Any.annotate({ [ZodOverride]: z.array(ConfigPermission.Info) })).annotate({
+    description: "Internal: permission configs from each source for layered merging",
+  }),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   enterprise: Schema.optional(
     Schema.Struct({
@@ -653,11 +661,12 @@ export const layer = Layer.effect(
         }
 
         if (Flag.OPENCODE_PERMISSION) {
-          result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+          const envPermission = JSON.parse(Flag.OPENCODE_PERMISSION) as ConfigPermission.Info
+          result.permission_layers = [...(result.permission_layers ?? []), envPermission]
         }
 
         if (result.tools) {
-          const perms: Record<string, ConfigPermission.Action> = {}
+          const perms: ConfigPermission.Info = {}
           for (const [tool, enabled] of Object.entries(result.tools)) {
             const action: ConfigPermission.Action = enabled ? "allow" : "deny"
             if (tool === "write" || tool === "edit" || tool === "patch") {
@@ -666,7 +675,8 @@ export const layer = Layer.effect(
             }
             perms[tool] = action
           }
-          result.permission = mergeDeep(perms, result.permission ?? {})
+          // Tools permissions come before other permissions (they can be overridden)
+          result.permission_layers = [perms, ...(result.permission_layers ?? [])]
         }
 
         if (!result.username) result.username = os.userInfo().username
