@@ -207,11 +207,7 @@ const live: Layer.Layer<
         input.model.providerID.toLowerCase().includes("litellm") ||
         input.model.api.id.toLowerCase().includes("litellm")
 
-      const repair = (toolName: string) => {
-        const next = toolName.toLowerCase()
-        if (!tools[next]) return
-        return next
-      }
+      const repair = (toolName: string) => repairToolName(toolName, tools)
 
       // LiteLLM/Bedrock rejects requests where the message history contains tool
       // calls but no tools param is present. When there are no active tools (e.g.
@@ -448,6 +444,12 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Plugin.defaultLayer),
   ),
 )
+
+export function repairToolName(toolName: string, tools: Record<string, Tool>) {
+  const next = ShellToolID.normalize(toolName.toLowerCase())
+  if (!tools[next]) return
+  return next
+}
 
 function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(

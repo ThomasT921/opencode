@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import path from "path"
-import { tool, type ModelMessage } from "ai"
+import { tool, type ModelMessage, type Tool } from "ai"
 import { Cause, Effect, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
@@ -116,6 +116,17 @@ describe("session.llm.hasToolCalls", () => {
       },
     ] as ModelMessage[]
     expect(LLM.hasToolCalls(messages)).toBe(true)
+  })
+})
+
+describe("session.llm.repairToolName", () => {
+  test("normalizes legacy bash alias to shell when available", () => {
+    expect(LLM.repairToolName("bash", { shell: {} as Tool })).toBe("shell")
+    expect(LLM.repairToolName("BASH", { shell: {} as Tool })).toBe("shell")
+  })
+
+  test("returns undefined when normalized tool is unavailable", () => {
+    expect(LLM.repairToolName("bash", { read: {} as Tool })).toBeUndefined()
   })
 })
 
