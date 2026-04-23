@@ -1,4 +1,4 @@
-import { Wildcard } from "@/util/wildcard"
+import { Wildcard } from "@/util"
 import { ShellToolID } from "@/tool/shell/id"
 
 type Rule = {

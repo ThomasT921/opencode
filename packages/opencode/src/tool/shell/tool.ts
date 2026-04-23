@@ -1,3 +1,1 @@
-import { createShellTool } from "./util"
-
-export const ShellTool = createShellTool()
+export { ShellTool } from "../bash"

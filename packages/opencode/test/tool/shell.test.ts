@@ -1,16 +1,36 @@
 import { describe, expect, test } from "bun:test"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import os from "os"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
-import { ShellKind, ShellToolID } from "../../src/tool/shell/id"
+import { ShellToolID } from "../../src/tool/shell/id"
 import { ShellTool } from "../../src/tool/shell/tool"
-import { ShellRunner } from "../../src/tool/shell/runner"
 import { Instance } from "../../src/project/instance"
-import { Filesystem } from "../../src/util/filesystem"
+import { Filesystem } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
-import { Truncate } from "../../src/tool/truncate"
+import { Agent } from "../../src/agent/agent"
+import { Truncate } from "../../src/tool"
 import { SessionID, MessageID } from "../../src/session/schema"
+import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
+import { AppFileSystem } from "@opencode-ai/shared/filesystem"
+import { Plugin } from "../../src/plugin"
+
+const runtime = ManagedRuntime.make(
+  Layer.mergeAll(
+    CrossSpawnSpawner.defaultLayer,
+    AppFileSystem.defaultLayer,
+    Plugin.defaultLayer,
+    Truncate.defaultLayer,
+    Agent.defaultLayer,
+  ),
+)
+
+function initBash() {
+  return runtime.runPromise(ShellTool.pipe(Effect.flatMap((info) => info.init())))
+}
+
+const initShell = initBash
 
 const ctx = {
   sessionID: SessionID.make("ses_test"),
@@ -19,8 +39,8 @@ const ctx = {
   agent: "build",
   abort: AbortSignal.any([]),
   messages: [],
-  metadata: () => {},
-  ask: async () => {},
+  metadata: () => Effect.void,
+  ask: () => Effect.void,
 }
 
 Shell.acceptable.reset()
@@ -47,23 +67,20 @@ const shells = (() => {
     (item, i) => list.findIndex((other) => other.shell.toLowerCase() === item.shell.toLowerCase()) === i,
   )
 })()
-const ps = shells.filter((item) => ShellKind.powershell(item.label))
+const PS = new Set(["pwsh", "powershell"])
+const ps = shells.filter((item) => PS.has(item.label))
 
 const sh = () => Shell.name(Shell.acceptable())
 const evalarg = (text: string) => (sh() === "cmd" ? quote(text) : squote(text))
-const js = (code: string, ...args: Array<number | string>) => {
-  const tail = args.length ? ` ${args.map(String).join(" ")}` : ""
-  const text = `${bin} -e ${evalarg(code)}${tail}`
-  if (ShellKind.powershell(sh())) return `& ${text}`
-  return text
-}
 
 const fill = (mode: "lines" | "bytes", n: number) => {
   const code =
     mode === "lines"
       ? "console.log(Array.from({length:Number(Bun.argv[1])},(_,i)=>i+1).join(String.fromCharCode(10)))"
       : "process.stdout.write(String.fromCharCode(97).repeat(Number(Bun.argv[1])))"
-  return js(code, n)
+  const text = `${bin} -e ${evalarg(code)} ${n}`
+  if (PS.has(sh())) return `& ${text}`
+  return text
 }
 const glob = (p: string) =>
   process.platform === "win32" ? Filesystem.normalizePathPattern(p) : p.replaceAll("\\", "/")
@@ -91,12 +108,6 @@ const withShell = (item: { label: string; shell: string }, fn: () => Promise<voi
   }
 }
 
-const expectedPermission = () => ShellToolID.id
-
-const getTool = async () => {
-  return await ShellTool.init()
-}
-
 const each = (name: string, fn: (item: { label: string; shell: string }) => Promise<void>) => {
   for (const item of shells) {
     test(
@@ -106,21 +117,13 @@ const each = (name: string, fn: (item: { label: string; shell: string }) => Prom
   }
 }
 
-const eachps = (name: string, fn: (item: { label: string; shell: string }) => Promise<void>) => {
-  for (const item of ps) {
-    test(
-      `${name} [${item.label}]`,
-      withShell(item, () => fn(item)),
-    )
-  }
-}
-
 const capture = (requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">>, stop?: Error) => ({
   ...ctx,
-  ask: async (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) => {
-    requests.push(req)
-    if (stop) throw stop
-  },
+  ask: (req: Omit<Permission.Request, "id" | "sessionID" | "tool">) =>
+    Effect.sync(() => {
+      requests.push(req)
+      if (stop) throw stop
+    }),
 })
 
 const mustTruncate = (result: {
@@ -133,20 +136,24 @@ const mustTruncate = (result: {
   )
 }
 
+const expectedPermission = ShellToolID.id
+
 describe("tool.shell", () => {
   each("basic", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: "echo test",
-            description: "Echo test message",
-          },
-          ctx,
+        const bash = await initShell()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: "echo test",
+              description: "Echo test message",
+            },
+            ctx,
+          ),
         )
-        expect(result.metadata.exit ?? -1).toBe(0)
+        expect(result.metadata.exit).toBe(0)
         expect(result.metadata.output).toContain("test")
       },
     })
@@ -159,17 +166,19 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute(
-          {
-            command: "echo hello",
-            description: "Echo hello",
-          },
-          capture(requests),
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: "echo hello",
+              description: "Echo hello",
+            },
+            capture(requests),
+          ),
         )
         expect(requests.length).toBe(1)
-        expect(requests[0].permission).toBe(expectedPermission())
+        expect(requests[0].permission).toBe(expectedPermission)
         expect(requests[0].patterns).toContain("echo hello")
       },
     })
@@ -180,17 +189,19 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute(
-          {
-            command: "echo foo && echo bar",
-            description: "Echo twice",
-          },
-          capture(requests),
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: "echo foo && echo bar",
+              description: "Echo twice",
+            },
+            capture(requests),
+          ),
         )
         expect(requests.length).toBe(1)
-        expect(requests[0].permission).toBe(expectedPermission())
+        expect(requests[0].permission).toBe(expectedPermission)
         expect(requests[0].patterns).toContain("echo foo")
         expect(requests[0].patterns).toContain("echo bar")
       },
@@ -204,16 +215,18 @@ describe("tool.shell permissions", () => {
         await Instance.provide({
           directory: projectRoot,
           fn: async () => {
-            const bash = await getTool()
+            const bash = await initShell()
             const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-            await bash.execute(
-              {
-                command: "Write-Host foo; if ($?) { Write-Host bar }",
-                description: "Check PowerShell conditional",
-              },
-              capture(requests),
+            await Effect.runPromise(
+              bash.execute(
+                {
+                  command: "Write-Host foo; if ($?) { Write-Host bar }",
+                  description: "Check PowerShell conditional",
+                },
+                capture(requests),
+              ),
             )
-            const bashReq = requests.find((r) => r.permission === expectedPermission())
+            const bashReq = requests.find((r) => r.permission === expectedPermission)
             expect(bashReq).toBeDefined()
             expect(bashReq!.patterns).toContain("Write-Host foo")
             expect(bashReq!.patterns).toContain("Write-Host bar")
@@ -228,18 +241,20 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const err = new Error("stop after permission")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         const file = process.platform === "win32" ? `${process.env.WINDIR!.replaceAll("\\", "/")}/*` : "/etc/*"
         const want = process.platform === "win32" ? glob(path.join(process.env.WINDIR!, "*")) : "/etc/*"
         await expect(
-          bash.execute(
-            {
-              command: `cat ${file}`,
-              description: "Read wildcard path",
-            },
-            capture(requests, err),
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: `cat ${file}`,
+                description: "Read wildcard path",
+              },
+              capture(requests, err),
+            ),
           ),
         ).rejects.toThrow(err.message)
         const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -252,7 +267,7 @@ describe("tool.shell permissions", () => {
   if (process.platform === "win32") {
     if (bash) {
       test(
-        "asks for nested shell command permissions [bash]",
+        "asks for nested bash command permissions [bash]",
         withShell({ label: "bash", shell: bash }, async () => {
           await using outerTmp = await tmpdir({
             init: async (dir) => {
@@ -262,18 +277,20 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const file = path.join(outerTmp.path, "outside.txt").replaceAll("\\", "/")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              await bash.execute(
-                {
-                  command: `echo $(cat "${file}")`,
-                  description: "Read nested bash file",
-                },
-                capture(requests),
+              await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: `echo $(cat "${file}")`,
+                    description: "Read nested bash file",
+                  },
+                  capture(requests),
+                ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === expectedPermission())
+              const bashReq = requests.find((r) => r.permission === expectedPermission)
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(glob(path.join(outerTmp.path, "*")))
               expect(bashReq).toBeDefined()
@@ -293,16 +310,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: `Copy-Item -PassThru "${process.env.WINDIR!.replaceAll("\\", "/")}/win.ini" ./out`,
-                    description: "Copy Windows ini",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: `Copy-Item -PassThru "${process.env.WINDIR!.replaceAll("\\", "/")}/win.ini" ./out`,
+                      description: "Copy Windows ini",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -321,18 +340,20 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               const file = `${process.env.WINDIR!.replaceAll("\\", "/")}/win.ini`
-              await bash.execute(
-                {
-                  command: `Write-Output $(Get-Content ${file})`,
-                  description: "Read nested PowerShell file",
-                },
-                capture(requests),
+              await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: `Write-Output $(Get-Content ${file})`,
+                    description: "Read nested PowerShell file",
+                  },
+                  capture(requests),
+                ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === expectedPermission())
+              const bashReq = requests.find((r) => r.permission === expectedPermission)
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(glob(path.join(process.env.WINDIR!, "*")))
               expect(bashReq).toBeDefined()
@@ -351,16 +372,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: tmp.path,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: 'Get-Content "C:../outside.txt"',
-                    description: "Read drive-relative file",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: 'Get-Content "C:../outside.txt"',
+                      description: "Read drive-relative file",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -379,16 +402,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: 'Get-Content "$HOME/.ssh/config"',
-                    description: "Read home config",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: 'Get-Content "$HOME/.ssh/config"',
+                      description: "Read home config",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -408,16 +433,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: tmp.path,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: 'Get-Content "$PWD/../outside.txt"',
-                    description: "Read pwd-relative file",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: 'Get-Content "$PWD/../outside.txt"',
+                      description: "Read pwd-relative file",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -436,16 +463,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: 'Get-Content "$PSHOME/outside.txt"',
-                    description: "Read pshome file",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: 'Get-Content "$PSHOME/outside.txt"',
+                      description: "Read pshome file",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -468,17 +497,19 @@ describe("tool.shell permissions", () => {
             await Instance.provide({
               directory: projectRoot,
               fn: async () => {
-                const bash = await getTool()
+                const bash = await initShell()
                 const err = new Error("stop after permission")
                 const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
                 const root = path.parse(process.env.WINDIR!).root.replace(/[\\/]+$/, "")
                 await expect(
-                  bash.execute(
-                    {
-                      command: `Get-Content -Path "${root}$env:${key}\\Windows\\win.ini"`,
-                      description: "Read Windows ini with missing env",
-                    },
-                    capture(requests, err),
+                  Effect.runPromise(
+                    bash.execute(
+                      {
+                        command: `Get-Content -Path "${root}$env:${key}\\Windows\\win.ini"`,
+                        description: "Read Windows ini with missing env",
+                      },
+                      capture(requests, err),
+                    ),
                   ),
                 ).rejects.toThrow(err.message)
                 const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -501,14 +532,16 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              await bash.execute(
-                {
-                  command: "Get-Content $env:WINDIR/win.ini",
-                  description: "Read Windows ini from env",
-                },
-                capture(requests),
+              await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: "Get-Content $env:WINDIR/win.ini",
+                    description: "Read Windows ini from env",
+                  },
+                  capture(requests),
+                ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
               expect(extDirReq).toBeDefined()
@@ -528,16 +561,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: `Get-Content -Path FileSystem::${process.env.WINDIR!.replaceAll("\\", "/")}/win.ini`,
-                    description: "Read Windows ini from FileSystem provider",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: `Get-Content -Path FileSystem::${process.env.WINDIR!.replaceAll("\\", "/")}/win.ini`,
+                      description: "Read Windows ini from FileSystem provider",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -558,16 +593,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               await expect(
-                bash.execute(
-                  {
-                    command: "Get-Content ${env:WINDIR}/win.ini",
-                    description: "Read Windows ini from braced env",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: "Get-Content ${env:WINDIR}/win.ini",
+                      description: "Read Windows ini from braced env",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
@@ -588,17 +625,19 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              await bash.execute(
-                {
-                  command: "Set-Location C:/Windows",
-                  description: "Change location",
-                },
-                capture(requests),
+              await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: "Set-Location C:/Windows",
+                    description: "Change location",
+                  },
+                  capture(requests),
+                ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === expectedPermission())
+                const bashReq = requests.find((r) => r.permission === expectedPermission)
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(
                 Filesystem.normalizePathPattern(path.join(process.env.WINDIR!, "*")),
@@ -617,16 +656,18 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initShell()
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              await bash.execute(
-                {
-                  command: "Write-Output ('a' * 3)",
-                  description: "Write repeated text",
-                },
-                capture(requests),
+              await Effect.runPromise(
+                bash.execute(
+                  {
+                    command: "Write-Output ('a' * 3)",
+                    description: "Write repeated text",
+                  },
+                  capture(requests),
+                ),
               )
-              const bashReq = requests.find((r) => r.permission === expectedPermission())
+              const bashReq = requests.find((r) => r.permission === expectedPermission)
               expect(bashReq).toBeDefined()
               expect(bashReq!.patterns).not.toContain("a * 3")
               expect(bashReq!.always).not.toContain("a *")
@@ -642,16 +683,18 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const err = new Error("stop after permission")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         await expect(
-          bash.execute(
-            {
-              command: "cd ../",
-              description: "Change to parent directory",
-            },
-            capture(requests, err),
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: "cd ../",
+                description: "Change to parent directory",
+              },
+              capture(requests, err),
+            ),
           ),
         ).rejects.toThrow(err.message)
         const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -665,17 +708,19 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const err = new Error("stop after permission")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         await expect(
-          bash.execute(
-            {
-              command: "echo ok",
-              workdir: os.tmpdir(),
-              description: "Echo from temp dir",
-            },
-            capture(requests, err),
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: "echo ok",
+                workdir: os.tmpdir(),
+                description: "Echo from temp dir",
+              },
+              capture(requests, err),
+            ),
           ),
         ).rejects.toThrow(err.message)
         const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -693,19 +738,21 @@ describe("tool.shell permissions", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const bash = await getTool()
+          const bash = await initBash()
           const want = Filesystem.normalizePathPattern(path.join(outerTmp.path, "*"))
 
           for (const dir of forms(outerTmp.path)) {
             const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
             await expect(
-              bash.execute(
-                {
-                  command: "echo ok",
-                  workdir: dir,
-                  description: "Echo from external dir",
-                },
-                capture(requests, err),
+              Effect.runPromise(
+                bash.execute(
+                  {
+                    command: "echo ok",
+                    workdir: dir,
+                    description: "Echo from external dir",
+                  },
+                  capture(requests, err),
+                ),
               ),
             ).rejects.toThrow(err.message)
 
@@ -727,18 +774,20 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               const want = glob(path.join(os.tmpdir(), "*"))
               await expect(
-                bash.execute(
-                  {
-                    command: "echo ok",
-                    workdir: "/tmp",
-                    description: "Echo from Git Bash tmp",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: "echo ok",
+                      workdir: "/tmp",
+                      description: "Echo from Git Bash tmp",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]).toMatchObject({
@@ -757,17 +806,19 @@ describe("tool.shell permissions", () => {
           await Instance.provide({
             directory: projectRoot,
             fn: async () => {
-              const bash = await getTool()
+              const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
               const want = glob(path.join(os.tmpdir(), "*"))
               await expect(
-                bash.execute(
-                  {
-                    command: "cat /tmp/opencode-does-not-exist",
-                    description: "Read Git Bash tmp file",
-                  },
-                  capture(requests, err),
+                Effect.runPromise(
+                  bash.execute(
+                    {
+                      command: "cat /tmp/opencode-does-not-exist",
+                      description: "Read Git Bash tmp file",
+                    },
+                    capture(requests, err),
+                  ),
                 ),
               ).rejects.toThrow(err.message)
               expect(requests[0]).toMatchObject({
@@ -792,17 +843,19 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const err = new Error("stop after permission")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         const filepath = path.join(outerTmp.path, "outside.txt")
         await expect(
-          bash.execute(
-            {
-              command: `cat ${filepath}`,
-              description: "Read external file",
-            },
-            capture(requests, err),
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: `cat ${filepath}`,
+                description: "Read external file",
+              },
+              capture(requests, err),
+            ),
           ),
         ).rejects.toThrow(err.message)
         const extDirReq = requests.find((r) => r.permission === "external_directory")
@@ -823,14 +876,16 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute(
-          {
-            command: `rm -rf ${path.join(tmp.path, "nested")}`,
-            description: "Remove nested dir",
-          },
-          capture(requests),
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: `rm -rf ${path.join(tmp.path, "nested")}`,
+              description: "Remove nested dir",
+            },
+            capture(requests),
+          ),
         )
         const extDirReq = requests.find((r) => r.permission === "external_directory")
         expect(extDirReq).toBeUndefined()
@@ -843,14 +898,16 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute(
-          {
-            command: "git log --oneline -5",
-            description: "Git log",
-          },
-          capture(requests),
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: "git log --oneline -5",
+              description: "Git log",
+            },
+            capture(requests),
+          ),
         )
         expect(requests.length).toBe(1)
         expect(requests[0].always.length).toBeGreaterThan(0)
@@ -864,16 +921,18 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute(
-          {
-            command: "cd .",
-            description: "Stay in current directory",
-          },
-          capture(requests),
+        await Effect.runPromise(
+          bash.execute(
+            {
+              command: "cd .",
+              description: "Stay in current directory",
+            },
+            capture(requests),
+          ),
         )
-        const bashReq = requests.find((r) => r.permission === expectedPermission())
+        const bashReq = requests.find((r) => r.permission === expectedPermission)
         expect(bashReq).toBeUndefined()
       },
     })
@@ -884,16 +943,18 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const err = new Error("stop after permission")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         await expect(
-          bash.execute(
-            { command: "echo test > output.txt", description: "Redirect test output" },
-            capture(requests, err),
+          Effect.runPromise(
+            bash.execute(
+              { command: "echo test > output.txt", description: "Redirect test output" },
+              capture(requests, err),
+            ),
           ),
         ).rejects.toThrow(err.message)
-        const bashReq = requests.find((r) => r.permission === expectedPermission())
+        const bashReq = requests.find((r) => r.permission === expectedPermission)
         expect(bashReq).toBeDefined()
         expect(bashReq!.patterns).toContain("echo test > output.txt")
       },
@@ -905,10 +966,10 @@ describe("tool.shell permissions", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initBash()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-        await bash.execute({ command: "ls -la", description: "List" }, capture(requests))
-        const bashReq = requests.find((r) => r.permission === expectedPermission())
+        await Effect.runPromise(bash.execute({ command: "ls -la", description: "List" }, capture(requests)))
+        const bashReq = requests.find((r) => r.permission === expectedPermission)
         expect(bashReq).toBeDefined()
         expect(bashReq!.always[0]).toBe("ls *")
       },
@@ -916,208 +977,127 @@ describe("tool.shell permissions", () => {
   })
 })
 
-describe("tool.shell description", () => {
-  each("renders description without placeholders", async () => {
+describe("tool.shell abort", () => {
+  test("preserves output when aborted", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const tool = await getTool()
-        expect(tool.description).not.toContain("${")
-        expect(tool.description).toContain(projectRoot)
-        expect(tool.description).toContain(`Shell: ${sh()}`)
-      },
-    })
-  })
-})
-
-describe("tool.shell runtime", () => {
-  each("preserves output when aborted", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const controller = new AbortController()
-        const updates: string[] = []
-        const result = bash.execute(
-          {
-            command: js("console.log(111);setTimeout(()=>{},30000)"),
-            description: "Long running command",
-          },
-          {
-            ...ctx,
-            abort: controller.signal,
-            metadata: (input) => {
-              const output = (input.metadata as { output?: string })?.output
-              if (output && output.includes("111") && !controller.signal.aborted) {
-                updates.push(output)
-                controller.abort()
-              }
+        const collected: string[] = []
+        const res = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `echo before && sleep 30`,
+              description: "Long running command",
             },
-          },
+            {
+              ...ctx,
+              abort: controller.signal,
+              metadata: (input) =>
+                Effect.sync(() => {
+                  const output = (input.metadata as { output?: string })?.output
+                  if (output && output.includes("before") && !controller.signal.aborted) {
+                    collected.push(output)
+                    controller.abort()
+                  }
+                }),
+            },
+          ),
         )
-        const res = await result
-        expect(res.output).toContain("111")
+        expect(res.output).toContain("before")
         expect(res.output).toContain("User aborted the command")
-        expect(updates.length).toBeGreaterThan(0)
+        expect(collected.length).toBeGreaterThan(0)
       },
     })
-  })
+  }, 15_000)
 
-  each("does not hang when already aborted", async (item) => {
-    const controller = new AbortController()
-    controller.abort()
-    const result = await Promise.race([
-      ShellRunner.run(
-        {
-          shell: item.shell,
-          kind: ShellKind.from(item.label),
-          command: js("setTimeout(()=>{},30000)"),
-          cwd: projectRoot,
-          env: process.env,
-          timeout: 500,
-          description: "Already aborted",
-        },
-        {
-          ...ctx,
-          abort: controller.signal,
-        },
-      ),
-      Bun.sleep(1500).then(() => "timeout" as const),
-    ])
-    expect(result).not.toBe("timeout")
-    if (result === "timeout") return
-    expect(result.output).toContain("User aborted the command")
-  })
-
-  each("terminates command on timeout", async () => {
+  test("terminates command on timeout", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: js("console.log(222);setTimeout(()=>{},30000)"),
-            description: "Timeout test",
-            timeout: 500,
-          },
-          ctx,
-        )
-        expect(result.output).toContain("222")
-        expect(result.output).toContain("shell tool terminated command after exceeding timeout")
-      },
-    })
-  })
-
-  each("captures stderr in output", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: js("console.log(333);console.error(444)"),
-            description: "Stderr test",
-          },
-          ctx,
-        )
-        expect(result.output).toContain("333")
-        expect(result.output).toContain("444")
-        expect(result.metadata.exit ?? -1).toBe(0)
-      },
-    })
-  })
-
-  each("returns non-zero exit code", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: js("process.exit(42)"),
-            description: "Non-zero exit",
-          },
-          ctx,
-        )
-        expect(result.metadata.exit ?? -1).toBe(42)
-      },
-    })
-  })
-
-  eachps("preserves native exit code with trailing comment", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: `${js("process.exit(42)")} # keep wrapper separate`,
-            description: "Trailing comment exit",
-          },
-          ctx,
-        )
-        expect(result.metadata.exit ?? -1).toBe(42)
-      },
-    })
-  })
-
-  eachps("returns non-zero exit for powershell cmdlet errors", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: "Write-Error x",
-            description: "Cmdlet error exit",
-          },
-          ctx,
-        )
-        expect(result.metadata.exit ?? -1).toBe(1)
-      },
-    })
-  })
-
-  each("preserves multibyte utf8 output across chunks", async (item) => {
-    const result = await ShellRunner.run(
-      {
-        shell: item.shell,
-        kind: ShellKind.from(item.label),
-        command: js(
-          "process.stdout.write(Buffer.from([0xF0,0x9F]));setTimeout(()=>process.stdout.write(Buffer.from([0x98,0x80])),20);setTimeout(()=>process.exit(0),40)",
-        ),
-        cwd: projectRoot,
-        env: process.env,
-        timeout: 1000,
-        description: "Utf8 output",
-      },
-      ctx,
-    )
-    expect(result.output).toContain("😀")
-    expect(result.output).not.toContain("\ufffd")
-  })
-
-  each("streams metadata updates progressively", async () => {
-    await Instance.provide({
-      directory: projectRoot,
-      fn: async () => {
-        const bash = await getTool()
-        const updates: string[] = []
-        const result = await bash.execute(
-          {
-            command: js("console.log(1);setTimeout(()=>console.log(2),200);setTimeout(()=>process.exit(0),400)"),
-            description: "Streaming test",
-          },
-          {
-            ...ctx,
-            metadata: (input) => {
-              const output = (input.metadata as { output?: string })?.output
-              if (output) updates.push(output)
+        const bash = await initShell()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `echo started && sleep 60`,
+              description: "Timeout test",
+              timeout: 500,
             },
-          },
+            ctx,
+          ),
         )
-        expect(result.output).toContain("1")
-        expect(result.output).toContain("2")
+        expect(result.output).toContain("started")
+        expect(result.output).toContain("shell tool terminated command after exceeding timeout")
+        expect(result.output).toContain("retry with a larger timeout value in milliseconds")
+      },
+    })
+  }, 15_000)
+
+  test.skipIf(process.platform === "win32")("captures stderr in output", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initShell()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `echo stdout_msg && echo stderr_msg >&2`,
+              description: "Stderr test",
+            },
+            ctx,
+          ),
+        )
+        expect(result.output).toContain("stdout_msg")
+        expect(result.output).toContain("stderr_msg")
+        expect(result.metadata.exit).toBe(0)
+      },
+    })
+  })
+
+  test("returns non-zero exit code", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initShell()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `exit 42`,
+              description: "Non-zero exit",
+            },
+            ctx,
+          ),
+        )
+        expect(result.metadata.exit).toBe(42)
+      },
+    })
+  })
+
+  test("streams metadata updates progressively", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const updates: string[] = []
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: `echo first && sleep 0.1 && echo second`,
+              description: "Streaming test",
+            },
+            {
+              ...ctx,
+              metadata: (input) =>
+                Effect.sync(() => {
+                  const output = (input.metadata as { output?: string })?.output
+                  if (output) updates.push(output)
+                }),
+            },
+          ),
+        )
+        expect(result.output).toContain("first")
+        expect(result.output).toContain("second")
         expect(updates.length).toBeGreaterThan(1)
       },
     })
@@ -1125,57 +1105,63 @@ describe("tool.shell runtime", () => {
 })
 
 describe("tool.shell truncation", () => {
-  each("truncates output exceeding line limit", async () => {
+  test("truncates output exceeding line limit", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const lineCount = Truncate.MAX_LINES + 500
-        const result = await bash.execute(
-          {
-            command: fill("lines", lineCount),
-            description: "Generate lines exceeding limit",
-          },
-          ctx,
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: fill("lines", lineCount),
+              description: "Generate lines exceeding limit",
+            },
+            ctx,
+          ),
         )
         mustTruncate(result)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
       },
     })
   })
 
-  each("truncates output exceeding byte limit", async () => {
+  test("truncates output exceeding byte limit", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const byteCount = Truncate.MAX_BYTES + 10000
-        const result = await bash.execute(
-          {
-            command: fill("bytes", byteCount),
-            description: "Generate bytes exceeding limit",
-          },
-          ctx,
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: fill("bytes", byteCount),
+              description: "Generate bytes exceeding limit",
+            },
+            ctx,
+          ),
         )
         mustTruncate(result)
-        expect(result.output).toContain("truncated")
-        expect(result.output).toContain("The tool call succeeded but the output was truncated")
+        expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
+        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
       },
     })
   })
 
-  each("does not truncate small output", async () => {
+  test("does not truncate small output", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
-        const result = await bash.execute(
-          {
-            command: "echo hello",
-            description: "Echo hello",
-          },
-          ctx,
+        const bash = await initShell()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: "echo hello",
+              description: "Echo hello",
+            },
+            ctx,
+          ),
         )
         expect((result.metadata as { truncated?: boolean }).truncated).toBe(false)
         expect(result.output).toContain("hello")
@@ -1183,18 +1169,20 @@ describe("tool.shell truncation", () => {
     })
   })
 
-  each("full output is saved to file when truncated", async () => {
+  test("full output is saved to file when truncated", async () => {
     await Instance.provide({
       directory: projectRoot,
       fn: async () => {
-        const bash = await getTool()
+        const bash = await initShell()
         const lineCount = Truncate.MAX_LINES + 100
-        const result = await bash.execute(
-          {
-            command: fill("lines", lineCount),
-            description: "Generate lines for file check",
-          },
-          ctx,
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: fill("lines", lineCount),
+              description: "Generate lines for file check",
+            },
+            ctx,
+          ),
         )
         mustTruncate(result)
 
