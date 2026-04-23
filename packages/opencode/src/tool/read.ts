@@ -78,7 +78,7 @@ export const ReadTool = Tool.define(
 
     const warm = Effect.fn("ReadTool.warm")(function* (filepath: string) {
       yield* search.open({ file: filepath }).pipe(Effect.ignore)
-      yield* lsp.touchFile(filepath, false).pipe(Effect.ignore, Effect.forkIn(scope))
+      yield* lsp.touchFile(filepath).pipe(Effect.ignore, Effect.forkIn(scope))
     })
 
     const readSample = Effect.fn("ReadTool.readSample")(function* (
