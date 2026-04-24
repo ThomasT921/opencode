@@ -1,0 +1,100 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -934,6 +934,10 @@ var anthropicLanguageModelOptions = import_v43.z.object({
+    */
+   effort: import_v43.z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+   /**
++   * Raw Anthropic `output_config` passthrough for Anthropic-compatible endpoints.
++   */
++  output_config: import_v43.z.record(import_v43.z.string(), import_v43.z.any()).optional(),
++  /**
+    * Task budget for agentic turns. Informs the model of the total token budget
+    * available for the current task, allowing it to prioritize work and wind down
+    * gracefully as the budget is consumed.
+@@ -3070,8 +3074,9 @@ var AnthropicMessagesLanguageModel = class {
+           ...thinkingDisplay != null && { display: thinkingDisplay }
+         }
+       },
+-      ...((anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
++      ...(Object.keys((anthropicOptions == null ? void 0 : anthropicOptions.output_config) ?? {}).length > 0 || (anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
+         output_config: {
++          ...(anthropicOptions == null ? void 0 : anthropicOptions.output_config),
+           ...(anthropicOptions == null ? void 0 : anthropicOptions.effort) && {
+             effort: anthropicOptions.effort
+           },
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -929,6 +929,10 @@ var anthropicLanguageModelOptions = z3.object({
+    */
+   effort: z3.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+   /**
++   * Raw Anthropic `output_config` passthrough for Anthropic-compatible endpoints.
++   */
++  output_config: z3.record(z3.string(), z3.any()).optional(),
++  /**
+    * Task budget for agentic turns. Informs the model of the total token budget
+    * available for the current task, allowing it to prioritize work and wind down
+    * gracefully as the budget is consumed.
+@@ -3107,8 +3111,9 @@ var AnthropicMessagesLanguageModel = class {
+           ...thinkingDisplay != null && { display: thinkingDisplay }
+         }
+       },
+-      ...((anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
++      ...(Object.keys((anthropicOptions == null ? void 0 : anthropicOptions.output_config) ?? {}).length > 0 || (anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
+         output_config: {
++          ...(anthropicOptions == null ? void 0 : anthropicOptions.output_config),
+           ...(anthropicOptions == null ? void 0 : anthropicOptions.effort) && {
+             effort: anthropicOptions.effort
+           },
+diff --git a/dist/internal/index.js b/dist/internal/index.js
+--- a/dist/internal/index.js
++++ b/dist/internal/index.js
+@@ -926,6 +926,10 @@ var anthropicLanguageModelOptions = import_v43.z.object({
+    */
+   effort: import_v43.z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+   /**
++   * Raw Anthropic `output_config` passthrough for Anthropic-compatible endpoints.
++   */
++  output_config: import_v43.z.record(import_v43.z.string(), import_v43.z.any()).optional(),
++  /**
+    * Task budget for agentic turns. Informs the model of the total token budget
+    * available for the current task, allowing it to prioritize work and wind down
+    * gracefully as the budget is consumed.
+@@ -3062,8 +3066,9 @@ var AnthropicMessagesLanguageModel = class {
+           ...thinkingDisplay != null && { display: thinkingDisplay }
+         }
+       },
+-      ...((anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
++      ...(Object.keys((anthropicOptions == null ? void 0 : anthropicOptions.output_config) ?? {}).length > 0 || (anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
+         output_config: {
++          ...(anthropicOptions == null ? void 0 : anthropicOptions.output_config),
+           ...(anthropicOptions == null ? void 0 : anthropicOptions.effort) && {
+             effort: anthropicOptions.effort
+           },
+diff --git a/dist/internal/index.mjs b/dist/internal/index.mjs
+--- a/dist/internal/index.mjs
++++ b/dist/internal/index.mjs
+@@ -913,6 +913,10 @@ var anthropicLanguageModelOptions = z3.object({
+    */
+   effort: z3.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+   /**
++   * Raw Anthropic `output_config` passthrough for Anthropic-compatible endpoints.
++   */
++  output_config: z3.record(z3.string(), z3.any()).optional(),
++  /**
+    * Task budget for agentic turns. Informs the model of the total token budget
+    * available for the current task, allowing it to prioritize work and wind down
+    * gracefully as the budget is consumed.
+@@ -3091,8 +3095,9 @@ var AnthropicMessagesLanguageModel = class {
+           ...thinkingDisplay != null && { display: thinkingDisplay }
+         }
+       },
+-      ...((anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
++      ...(Object.keys((anthropicOptions == null ? void 0 : anthropicOptions.output_config) ?? {}).length > 0 || (anthropicOptions == null ? void 0 : anthropicOptions.effort) || (anthropicOptions == null ? void 0 : anthropicOptions.taskBudget) || useStructuredOutput && (responseFormat == null ? void 0 : responseFormat.type) === "json" && responseFormat.schema != null) && {
+         output_config: {
++          ...(anthropicOptions == null ? void 0 : anthropicOptions.output_config),
+           ...(anthropicOptions == null ? void 0 : anthropicOptions.effort) && {
+             effort: anthropicOptions.effort
+           },
