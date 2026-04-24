@@ -8,7 +8,12 @@ import DESCRIPTION from "./repo_clone.txt"
 import * as Tool from "./tool"
 import { parseRepositoryReference, repositoryCachePath, sameRepositoryReference } from "@/util/repository"
 
-const parameters = z.object({
+type Parameters = {
+  repository: string
+  refresh?: boolean
+}
+
+const parameters: z.ZodType<Parameters> = z.object({
   repository: z
     .string()
     .describe("Repository to clone, as a git URL, host/path reference, or GitHub owner/repo shorthand"),
@@ -53,7 +58,7 @@ export const RepoCloneTool = Tool.define<typeof parameters, Metadata, AppFileSys
     return {
       description: DESCRIPTION,
       parameters,
-      execute: (params: z.infer<typeof parameters>, ctx: Tool.Context<Metadata>) =>
+      execute: (params: Parameters, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
           const reference = parseRepositoryReference(params.repository)
           if (!reference) throw new Error("Repository must be a git URL, host/path reference, or GitHub owner/repo shorthand")

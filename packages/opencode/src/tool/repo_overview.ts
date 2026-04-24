@@ -9,7 +9,13 @@ import * as Tool from "./tool"
 import { parseRepositoryReference, repositoryCachePath } from "@/util/repository"
 import { Instance } from "@/project/instance"
 
-const parameters = z
+type Parameters = {
+  repository?: string
+  path?: string
+  depth?: number
+}
+
+const parameters: z.ZodType<Parameters> = z
   .object({
     repository: z
       .string()
@@ -84,7 +90,7 @@ export const RepoOverviewTool = Tool.define<typeof parameters, Metadata, AppFile
     const fs = yield* AppFileSystem.Service
     const git = yield* Git.Service
 
-    const resolveTarget = Effect.fn("RepoOverviewTool.resolveTarget")(function* (params: z.infer<typeof parameters>) {
+    const resolveTarget = Effect.fn("RepoOverviewTool.resolveTarget")(function* (params: Parameters) {
       if (params.path) {
         const full = path.isAbsolute(params.path) ? params.path : path.resolve(Instance.directory, params.path)
         return { path: full, repository: params.repository }
@@ -147,7 +153,7 @@ export const RepoOverviewTool = Tool.define<typeof parameters, Metadata, AppFile
     return {
       description: DESCRIPTION,
       parameters,
-      execute: (params: z.infer<typeof parameters>, ctx: Tool.Context<Metadata>) =>
+      execute: (params: Parameters, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
           const target = yield* resolveTarget(params)
           const depth = params.depth ?? 3
