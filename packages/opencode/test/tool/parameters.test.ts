@@ -26,6 +26,7 @@ import { Parameters as Todo } from "../../src/tool/todo"
 import { Parameters as WebFetch } from "../../src/tool/webfetch"
 import { Parameters as WebSearch } from "../../src/tool/websearch"
 import { Parameters as Write } from "../../src/tool/write"
+import { SessionID } from "../../src/session/schema"
 
 const parse = <S extends Schema.Decoder<unknown>>(schema: S, input: unknown): S["Type"] =>
   Schema.decodeUnknownSync(schema)(input)
@@ -225,11 +226,11 @@ describe("tool parameters", () => {
         description: "d",
         prompt: "p",
         subagent_type: "general",
-        task_id: "ses_test",
+        task_id: SessionID.make("ses_test"),
         command: "/cmd",
         background: true,
       })
-      expect(parsed.task_id).toBe("ses_test")
+      expect(parsed.task_id).toBe(SessionID.make("ses_test"))
       expect(parsed.command).toBe("/cmd")
       expect(parsed.background).toBe(true)
     })
