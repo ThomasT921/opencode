@@ -619,7 +619,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
               type: "enabled",
             },
             output_config: {
-              effort: "max",
+              effort: "high",
             },
           },
           max: {
