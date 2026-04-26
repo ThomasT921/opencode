@@ -119,13 +119,6 @@ export function tui(input: {
 }) {
   return new Promise<void>((resolve, reject) => {
     const unguard = win32InstallCtrlCGuard()
-    let renderer: Awaited<ReturnType<typeof createCliRenderer>> | undefined
-    const fail = (error: unknown) => {
-      renderer?.destroy()
-      renderer = undefined
-      unguard?.()
-      reject(error)
-    }
 
     const onExit = async () => {
       unguard?.()
@@ -139,7 +132,7 @@ export function tui(input: {
     void (async () => {
       win32DisableProcessedInput()
 
-      renderer = await createCliRenderer(rendererConfig(input.config))
+      const renderer = await createCliRenderer(rendererConfig(input.config))
       const mode = (await renderer.waitForThemeMode(1000)) ?? "dark"
 
       await render(() => {
@@ -206,7 +199,7 @@ export function tui(input: {
           </ErrorBoundary>
         )
       }, renderer)
-    })().catch(fail)
+    })().catch(reject)
   })
 }
 
