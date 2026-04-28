@@ -1,6 +1,4 @@
-import { type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
 import { migrate } from "drizzle-orm/bun-sqlite/migrator"
-import { type SQLiteTransaction } from "drizzle-orm/sqlite-core"
 export * from "drizzle-orm"
 import { LocalContext } from "@/util/local-context"
 import { lazy } from "../util/lazy"
@@ -14,6 +12,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { InstanceState } from "@/effect/instance-state"
 import { iife } from "@/util/iife"
+import * as StorageSchema from "@/storage/schema"
 import { init } from "#db"
 
 declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
@@ -42,9 +41,9 @@ export const Path = iife(() => {
   return getChannelPath()
 })
 
-export type Transaction = SQLiteTransaction<"sync", void>
+export type Client = ReturnType<typeof open>
 
-export type Client = SQLiteBunDatabase
+export type Transaction = Parameters<Parameters<Client["transaction"]>[0]>[0]
 
 type Journal = { sql: string; timestamp: number; name: string }[]
 
@@ -91,7 +90,7 @@ function migrations(dir: string): Journal {
 export function open() {
   log.info("opening database", { path: Path })
 
-  const db = init(Path)
+  const db = init(Path, StorageSchema)
 
   db.run("PRAGMA journal_mode = WAL")
   db.run("PRAGMA synchronous = NORMAL")
@@ -123,38 +122,10 @@ export function open() {
 
 export const Client = lazy(open)
 
-let layerRefs = 0
-let layerOwner: Client | undefined
-
-export function acquire() {
-  const owner = Client.peek() === undefined
-  const client = Client()
-  if (owner) layerOwner = client
-  layerRefs++
-
-  let released = false
-  return {
-    client,
-    release() {
-      if (released) return
-      released = true
-      layerRefs--
-      if (layerRefs === 0 && layerOwner === client) {
-        layerOwner = undefined
-        close(client)
-      }
-    },
-  }
-}
-
 export function close(client = Client.peek()) {
   if (!client) return
   client.$client.close()
-  if (Client.peek() === client) {
-    layerRefs = 0
-    layerOwner = undefined
-    Client.reset()
-  }
+  if (Client.peek() === client) Client.reset()
 }
 
 export type TxOrDb = Transaction | Client
