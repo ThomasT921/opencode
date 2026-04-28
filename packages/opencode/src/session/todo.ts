@@ -5,7 +5,7 @@ import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import z from "zod"
-import { Database } from "@/storage/db"
+import { DatabaseEffect } from "@/storage/db-effect"
 import { eq } from "drizzle-orm"
 import { asc } from "drizzle-orm"
 import { TodoTable } from "./session.sql"
@@ -42,34 +42,34 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
+    const db = yield* DatabaseEffect.Service
 
     const update = Effect.fn("Todo.update")(function* (input: { sessionID: SessionID; todos: Info[] }) {
-      yield* Effect.sync(() =>
-        Database.transaction((db) => {
-          db.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).run()
-          if (input.todos.length === 0) return
-          db.insert(TodoTable)
-            .values(
-              input.todos.map((todo, position) => ({
-                session_id: input.sessionID,
-                content: todo.content,
-                status: todo.status,
-                priority: todo.priority,
-                position,
-              })),
-            )
-            .run()
-        }),
-      )
+      yield* Effect.gen(function* () {
+        yield* db.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID))
+        if (input.todos.length === 0) return
+        yield* db.insert(TodoTable).values(
+          input.todos.map((todo, position) => ({
+            session_id: input.sessionID,
+            content: todo.content,
+            status: todo.status,
+            priority: todo.priority,
+            position,
+          })),
+        )
+      }).pipe(db.withTransaction, Effect.orDie)
+
       yield* bus.publish(Event.Updated, input)
     })
 
     const get = Effect.fn("Todo.get")(function* (sessionID: SessionID) {
-      const rows = yield* Effect.sync(() =>
-        Database.use((db) =>
-          db.select().from(TodoTable).where(eq(TodoTable.session_id, sessionID)).orderBy(asc(TodoTable.position)).all(),
-        ),
-      )
+      const rows = yield* db
+        .select()
+        .from(TodoTable)
+        .where(eq(TodoTable.session_id, sessionID))
+        .orderBy(asc(TodoTable.position))
+        .pipe(Effect.orDie)
+
       return rows.map((row) => ({
         content: row.content,
         status: row.status,
@@ -81,6 +81,6 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
+export const defaultLayer: Layer.Layer<Service> = layer.pipe(Layer.provide(Bus.layer), Layer.provide(DatabaseEffect.layer))
 
 export * as Todo from "./todo"

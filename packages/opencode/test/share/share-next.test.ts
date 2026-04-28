@@ -15,6 +15,7 @@ import type { SessionID } from "../../src/session/schema"
 import { ShareNext } from "@/share/share-next"
 import { SessionShareTable } from "../../src/share/share.sql"
 import { Database } from "@/storage/db"
+import { DatabaseEffect } from "@/storage/db-effect"
 import { eq } from "drizzle-orm"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { resetDatabase } from "../fixture/db"
@@ -48,6 +49,7 @@ function live(client: HttpClient.HttpClient) {
     Layer.provide(http),
     Layer.provide(Provider.defaultLayer),
     Layer.provide(Session.defaultLayer),
+    Layer.provide(DatabaseEffect.layer),
   )
 }
 
@@ -66,6 +68,7 @@ function wired(client: HttpClient.HttpClient) {
     Layer.provide(Config.defaultLayer),
     Layer.provide(http),
     Layer.provide(Provider.defaultLayer),
+    Layer.provide(DatabaseEffect.layer),
   )
 }
 

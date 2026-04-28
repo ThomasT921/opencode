@@ -5,7 +5,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { ProjectID } from "@/project/schema"
 import { MessageID, SessionID } from "@/session/schema"
 import { PermissionTable } from "@/session/session.sql"
-import { Database } from "@/storage/db"
+import { DatabaseEffect } from "@/storage/db-effect"
 import { eq } from "drizzle-orm"
 import { zod } from "@/util/effect-zod"
 import * as Log from "@opencode-ai/core/util/log"
@@ -153,14 +153,17 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
+    const db = yield* DatabaseEffect.Service
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
-        const row = Database.use((db) =>
-          db.select().from(PermissionTable).where(eq(PermissionTable.project_id, ctx.project.id)).get(),
-        )
+        const rows = yield* db
+          .select()
+          .from(PermissionTable)
+          .where(eq(PermissionTable.project_id, ctx.project.id))
+          .pipe(Effect.orDie)
         const state = {
           pending: new Map<PermissionID, PendingEntry>(),
-          approved: row?.data ?? [],
+          approved: rows[0]?.data ?? [],
         }
 
         yield* Effect.addFinalizer(() =>
@@ -319,6 +322,6 @@ export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
   return result
 }
 
-export const defaultLayer = layer.pipe(Layer.provide(Bus.layer))
+export const defaultLayer: Layer.Layer<Service> = layer.pipe(Layer.provide(Bus.layer), Layer.provide(DatabaseEffect.layer))
 
 export * as Permission from "."
