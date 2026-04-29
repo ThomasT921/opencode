@@ -28,6 +28,7 @@ import { withStatics } from "@/util/schema"
 
 import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
+import { ProviderSmallModel } from "./small-model"
 
 const log = Log.create({ service: "provider" })
 
@@ -1611,22 +1612,10 @@ const layer: Layer.Layer<
       const provider = s.providers[providerID]
       if (!provider) return undefined
 
-      let priority = [
-        "claude-haiku-4-5",
-        "claude-haiku-4.5",
-        "3-5-haiku",
-        "3.5-haiku",
-        "gemini-3-flash",
-        "gemini-2.5-flash",
-        "gpt-5-nano",
-      ]
-      if (providerID.startsWith("opencode")) {
-        priority = ["gpt-5-nano"]
-      }
-      if (providerID.startsWith("github-copilot")) {
-        priority = ["gpt-5-mini", "claude-haiku-4.5", ...priority]
-      }
+      const priority = ProviderSmallModel.priority[providerID] ?? []
       for (const item of priority) {
+        if (provider.models[item]) return yield* getModel(providerID, ModelID.make(item))
+
         if (providerID === ProviderID.amazonBedrock) {
           const crossRegionPrefixes = ["global.", "us.", "eu."]
           const candidates = Object.keys(provider.models).filter((m) => m.includes(item))
