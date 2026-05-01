@@ -21,7 +21,7 @@ import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { EffectBridge } from "@/effect/bridge"
+import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 
@@ -266,7 +266,8 @@ const live: Layer.Layer<
           return !match || match.action !== "ask"
         })
 
-        const bridge = yield* EffectBridge.make()
+        const instance = yield* InstanceState.context
+        const workspace = yield* InstanceState.workspaceID
         const approvedToolsForSession = new Set<string>()
         workflowModel.approvalHandler = InstanceState.bind(async (approvalTools) => {
           const uniqueNames = [...new Set(approvalTools.map((t: { name: string }) => t.name))] as string[]
@@ -292,16 +293,21 @@ const live: Layer.Layer<
               }
             })
             const uniquePatterns = [...new Set(toolPatterns)] as string[]
-            await bridge.promise(
-              perm.ask({
-                id,
-                sessionID: SessionID.make(input.sessionID),
-                permission: "workflow_tool_approval",
-                patterns: uniquePatterns,
-                metadata: { tools: approvalTools },
-                always: uniquePatterns,
-                ruleset: [],
-              }),
+            await Effect.runPromise(
+              perm
+                .ask({
+                  id,
+                  sessionID: SessionID.make(input.sessionID),
+                  permission: "workflow_tool_approval",
+                  patterns: uniquePatterns,
+                  metadata: { tools: approvalTools },
+                  always: uniquePatterns,
+                  ruleset: [],
+                })
+                .pipe(
+                  Effect.provideService(InstanceRef, instance),
+                  Effect.provideService(WorkspaceRef, workspace),
+                ),
             )
             for (const name of uniqueNames) approvedToolsForSession.add(name)
             workflowModel.sessionPreapprovedTools = [...(workflowModel.sessionPreapprovedTools ?? []), ...uniqueNames]
