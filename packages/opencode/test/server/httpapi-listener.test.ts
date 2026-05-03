@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import type { ServerWebSocket } from "bun"
+import { mkdir } from "node:fs/promises"
+import path from "node:path"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import * as Log from "@opencode-ai/core/util/log"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import { registerAdapter } from "../../src/control-plane/adapters"
+import type { WorkspaceAdapter } from "../../src/control-plane/types"
+import { Workspace } from "../../src/control-plane/workspace"
+import { AppRuntime } from "../../src/effect/app-runtime"
+import { Project } from "../../src/project/project"
 import { HttpApiListener } from "../../src/server/httpapi-listener"
 import { PtyPaths } from "../../src/server/routes/instance/httpapi/groups/pty"
+import { Effect } from "effect"
 
 void Log.init({ print: false })
 
@@ -40,6 +49,99 @@ describe("native HttpApi listener", () => {
       })
     } finally {
       await listener.stop(true)
+    }
+  })
+
+  test("workspace-proxy WS forwarding round-trips through a fake remote", async () => {
+    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+
+    // Tiny Bun.serve fake remote that echoes every WS frame it receives.
+    type EchoState = { closed: boolean }
+    const remote = Bun.serve<EchoState>({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request, server) {
+        if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+          if (server.upgrade(request, { data: { closed: false } })) return undefined
+          return new Response("upgrade failed", { status: 400 })
+        }
+        return new Response("ok")
+      },
+      websocket: {
+        open(_ws: ServerWebSocket<EchoState>) {},
+        message(ws: ServerWebSocket<EchoState>, msg: string | Buffer) {
+          ws.send(typeof msg === "string" ? `echo:${msg}` : msg)
+        },
+        close(_ws: ServerWebSocket<EchoState>) {},
+      },
+    })
+
+    // The path "/probe" is not a known local-only or PTY route, so the listener
+    // should treat it as a candidate for workspace-proxy WS forwarding.
+    const remoteBase = `http://${remote.hostname}:${remote.port}`
+
+    // Register a remote workspace whose target points at the echo server.
+    const adapter: WorkspaceAdapter = {
+      name: "Remote Listener Test",
+      description: "Remote workspace target for HttpApiListener proxy WS test",
+      configure: (info) => ({ ...info, name: "remote-listener-test", directory: path.join(tmp.path, ".remote") }),
+      create: async () => {
+        await mkdir(path.join(tmp.path, ".remote"), { recursive: true })
+      },
+      async remove() {},
+      target: () => ({ type: "remote" as const, url: remoteBase }),
+    }
+
+    const workspaceID = await AppRuntime.runPromise(
+      Effect.gen(function* () {
+        const project = yield* Project.Service.use((svc) => svc.fromDirectory(tmp.path))
+        registerAdapter(project.project.id, "httpapi-listener-proxy-ws", adapter)
+        const created = yield* Workspace.Service.use((svc) =>
+          svc.create({
+            type: "httpapi-listener-proxy-ws",
+            branch: null,
+            extra: null,
+            projectID: project.project.id,
+          }),
+        )
+        return created.id
+      }),
+    )
+
+    const listener = await startListener()
+    try {
+      const wsURL = new URL("/probe", listener.url)
+      wsURL.protocol = "ws:"
+      wsURL.searchParams.set("workspace", workspaceID)
+
+      const messages: string[] = []
+      const ws = new WebSocket(wsURL)
+      ws.binaryType = "arraybuffer"
+
+      const opened = new Promise<void>((resolve, reject) => {
+        ws.addEventListener("open", () => resolve(), { once: true })
+        ws.addEventListener("error", () => reject(new Error("ws error before open")), { once: true })
+      })
+
+      ws.addEventListener("message", (event) => {
+        const data = event.data
+        messages.push(typeof data === "string" ? data : new TextDecoder().decode(data as ArrayBuffer))
+      })
+
+      await opened
+      ws.send("hello-proxy")
+
+      const start = Date.now()
+      while (!messages.some((m) => m === "echo:hello-proxy") && Date.now() - start < 5_000) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+
+      expect(messages).toContain("echo:hello-proxy")
+
+      ws.close(1000, "done")
+    } finally {
+      await listener.stop(true)
+      remote.stop(true)
     }
   })
 
