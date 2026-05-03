@@ -10,6 +10,7 @@ import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
 import { DatabaseEffect } from "@/storage/db-effect"
+import { getOne } from "@opencode-ai/effect-drizzle-sqlite"
 import { eq } from "drizzle-orm"
 import { Config } from "@/config/config"
 import * as Log from "@opencode-ai/core/util/log"
@@ -224,12 +225,9 @@ export const layer = Layer.effect(
     })
 
     const get = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const rows = yield* db
-        .select()
-        .from(SessionShareTable)
-        .where(eq(SessionShareTable.session_id, sessionID))
-        .pipe(Effect.orDie)
-      const row = rows[0]
+      const row = yield* getOne(
+        db.select().from(SessionShareTable).where(eq(SessionShareTable.session_id, sessionID)),
+      ).pipe(Effect.orDie)
       if (!row) return
       return { id: row.id, secret: row.secret, url: row.url } satisfies Share
     })

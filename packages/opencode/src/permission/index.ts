@@ -6,6 +6,7 @@ import { ProjectID } from "@/project/schema"
 import { MessageID, SessionID } from "@/session/schema"
 import { PermissionTable } from "@/session/session.sql"
 import { DatabaseEffect } from "@/storage/db-effect"
+import { getOne } from "@opencode-ai/effect-drizzle-sqlite"
 import { eq } from "drizzle-orm"
 import { zod } from "@/util/effect-zod"
 import * as Log from "@opencode-ai/core/util/log"
@@ -156,14 +157,15 @@ export const layer = Layer.effect(
     const db = yield* DatabaseEffect.Service
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
-        const rows = yield* db
-          .select()
-          .from(PermissionTable)
-          .where(eq(PermissionTable.project_id, ctx.project.id))
-          .pipe(Effect.orDie)
+        const row = yield* getOne(
+          db
+            .select()
+            .from(PermissionTable)
+            .where(eq(PermissionTable.project_id, ctx.project.id)),
+        ).pipe(Effect.orDie)
         const state = {
           pending: new Map<PermissionID, PendingEntry>(),
-          approved: rows[0]?.data ?? [],
+          approved: row?.data ?? [],
         }
 
         yield* Effect.addFinalizer(() =>

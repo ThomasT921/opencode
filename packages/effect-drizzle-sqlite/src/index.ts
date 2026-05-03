@@ -63,6 +63,10 @@ type SelectLike<A = unknown> = EffectLikeQuery<A> & {
   readonly all: () => A
 }
 
+type GetLike<A = unknown> = EffectLikeQuery & {
+  readonly get: () => A
+}
+
 type MutationLike<A = unknown> = EffectLikeQuery<A> & {
   readonly all: () => A
   readonly run: () => A
@@ -103,6 +107,8 @@ const fromSync = <A>(query: EffectLikeQuery, run: () => A) =>
 const fromMutation = (query: MutationLike) => fromSync(query, () => (query.config?.returning ? query.all() : query.run()))
 
 const fromCount = (query: CountLike) => fromSync(query, () => Number(query.session.values(query.sql)[0]?.[0] ?? 0))
+
+export const getOne = <A>(query: GetLike<A>) => fromSync(query, () => query.get())
 
 const fromExecuteResult = (result: unknown) => {
   if (result && typeof result === "object" && "sync" in result && typeof result.sync === "function") {
@@ -155,6 +161,7 @@ const attachTransaction = <
   TRelations extends AnyRelations = EmptyRelations,
 >(db: SQLiteBunDatabase<TSchema, TRelations> & { readonly $client: Database }): EffectSQLiteDatabase<TSchema, TRelations> => {
   const txStack: Array<SQLiteTransaction<"sync", void, TSchema, TRelations>> = []
+  const bound = new WeakMap<object, Map<PropertyKey, unknown>>()
   const current = () => txStack.at(-1) ?? db
   const runTransaction = (target: SQLiteBunDatabase<TSchema, TRelations> | SQLiteTransaction<"sync", void, TSchema, TRelations>) =>
     target.transaction.bind(target) as (
@@ -195,7 +202,11 @@ const attachTransaction = <
 
       const target = current()
       const value = Reflect.get(target, property)
-      return typeof value === "function" ? value.bind(target) : value
+      if (typeof value !== "function") return value
+      const methods = bound.get(target) ?? new Map<PropertyKey, unknown>()
+      bound.set(target, methods)
+      if (!methods.has(property)) methods.set(property, value.bind(target))
+      return methods.get(property)
     },
   }) as EffectSQLiteDatabase<TSchema, TRelations>
 }

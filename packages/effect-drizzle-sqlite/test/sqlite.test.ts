@@ -5,7 +5,7 @@ import { relations } from "drizzle-orm/_relations"
 import { drizzle as drizzleBun } from "drizzle-orm/bun-sqlite"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { Cause, Effect, Exit } from "effect"
-import { EffectDrizzleQueryError, make, type EffectSQLiteDatabase } from "../src"
+import { EffectDrizzleQueryError, getOne, make, type EffectSQLiteDatabase } from "../src"
 
 const users = sqliteTable("users", {
   id: integer().primaryKey(),
@@ -173,6 +173,15 @@ describe("effect drizzle sqlite", () => {
         { id: 1, name: "Ada" },
         { id: 2, name: "Grace" },
       ])
+    }),
+  )
+
+  testEffect("supports single-row select effects", () =>
+    Effect.gen(function* () {
+      yield* db.insert(users).values({ id: 1, name: "Ada" })
+
+      expect(yield* getOne(db.select().from(users).where(eq(users.id, 1)))).toEqual({ id: 1, name: "Ada" })
+      expect(yield* getOne(db.select().from(users).where(eq(users.id, 2)))).toBeUndefined()
     }),
   )
 
