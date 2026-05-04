@@ -21,6 +21,7 @@ import { getAdaptor } from "./adaptors"
 import { type WorkspaceInfo, WorkspaceInfo as WorkspaceInfoSchema } from "./types"
 import { WorkspaceID } from "./schema"
 import { Session } from "@/session/session"
+import { SessionPrompt } from "@/session/prompt"
 import { SessionTable } from "@/session/session.sql"
 import { SessionID } from "@/session/schema"
 import { errorData } from "@/util/error"
@@ -162,6 +163,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const auth = yield* Auth.Service
     const session = yield* Session.Service
+    const prompt = yield* SessionPrompt.Service
     const http = yield* HttpClient.HttpClient
     const connections = new Map<WorkspaceID, ConnectionStatus>()
     const syncFibers = yield* FiberMap.make<WorkspaceID, void, SyncLoopError>()
@@ -495,6 +497,8 @@ export const layer = Layer.effect(
 
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
       return yield* Effect.gen(function* () {
+        yield* prompt.cancel(input.sessionID)
+
         log.info("session warp requested", {
           workspaceID: input.workspaceID,
           sessionID: input.sessionID,
@@ -814,6 +818,7 @@ export const layer = Layer.effect(
 export const defaultLayer = layer.pipe(
   Layer.provide(Auth.defaultLayer),
   Layer.provide(Session.defaultLayer),
+  Layer.provide(SessionPrompt.defaultLayer),
   Layer.provide(FetchHttpClient.layer),
 )
 
