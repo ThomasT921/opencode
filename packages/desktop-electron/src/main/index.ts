@@ -54,12 +54,12 @@ import {
 // State — individual pieces, synchronously allocated at module load.
 // ---------------------------------------------------------------------------
 
-const initStep = Effect.runSync(SubscriptionRef.make<InitStep>({ _tag: "ServerWaiting" }))
-const serverReady = Effect.runSync(Deferred.make<ServerReadyData>())
-const loadingComplete = Effect.runSync(Deferred.make<void>())
+const initStep = Effect.runSync(SubscriptionRef.make<InitStep>(InitStep.ServerWaiting()))
+const serverReady = Deferred.makeUnsafe<ServerReadyData>()
+const loadingComplete = Deferred.makeUnsafe<void>()
 const deepLinkQueue = Effect.runSync(Queue.unbounded<string[]>())
-const deepLinksConsumed = Effect.runSync(Deferred.make<void>())
-const server = Effect.runSync(Ref.make<Option.Option<Server.Listener>>(Option.none()))
+const deepLinksConsumed = Deferred.makeUnsafe<void>()
+const server = Ref.makeUnsafe<Option.Option<Server.Listener>>(Option.none())
 const menuCommands = Effect.runSync(PubSub.unbounded<string>())
 const sqliteProgress = Effect.runSync(PubSub.unbounded<SqliteMigrationProgress>())
 
@@ -119,13 +119,8 @@ const stopServer = (ref: Ref.Ref<Option.Option<Server.Listener>>) =>
     }
   })
 
-// ---------------------------------------------------------------------------
-// Initialization flow (pure Effect — all state wired explicitly)
-// ---------------------------------------------------------------------------
-
 const initialize = Effect.fn("Main.initialize")(function* () {
-  const needsMigration = !(yield* sqliteFileExists)
-  const sqliteDone = needsMigration ? yield* Deferred.make<void>() : undefined
+  const needsMigration = !sqliteFileExists()
 
   const port = yield* getSidecarPort
   const hostname = "127.0.0.1"
@@ -135,36 +130,29 @@ const initialize = Effect.fn("Main.initialize")(function* () {
   const loadingFiber = yield* Effect.gen(function* () {
     logger.log("sidecar connection started", { url })
 
-    if (needsMigration && sqliteDone) {
-      yield* Effect.gen(function* () {
-        const { Database, JsonMigration } = yield* Effect.promise(
-          () => import("virtual:opencode-server") as Promise<typeof import("virtual:opencode-server")>,
-        )
-        const client = yield* Effect.sync(() => Database.Client().$client)
-        const db = yield* Effect.promise(() =>
-          import("drizzle-orm/node-sqlite/driver").then((m) => m.drizzle({ client })),
-        )
+    if (needsMigration) {
+      const { Database, JsonMigration } = yield* Effect.promise(
+        () => import("virtual:opencode-server") as Promise<typeof import("virtual:opencode-server")>,
+      )
+      const client = Database.Client().$client
+      const db = yield* Effect.promise(() =>
+        import("drizzle-orm/node-sqlite/driver").then((m) => m.drizzle({ client })),
+      )
 
-        yield* SubscriptionRef.set(initStep, InitStep.SqliteWaiting())
+      yield* SubscriptionRef.set(initStep, InitStep.SqliteWaiting())
 
-        yield* Effect.promise(() =>
-          JsonMigration.run(db, {
-            progress: (event: { current: number; total: number }) => {
-              const percent = Math.round((event.current / event.total) * 100)
-              const progress: SqliteMigrationProgress = { type: "InProgress", value: percent }
-              if (Option.isSome(overlay)) sendSqliteMigrationProgress(overlay.value, progress)
-              void Effect.runPromise(PubSub.publish(sqliteProgress, progress))
-            },
-          }),
-        )
+      yield* Effect.promise(() =>
+        JsonMigration.run(db, {
+          progress: (event: { current: number; total: number }) => {
+            const percent = Math.round((event.current / event.total) * 100)
+            const progress: SqliteMigrationProgress = { type: "InProgress", value: percent }
+            if (Option.isSome(overlay)) sendSqliteMigrationProgress(overlay.value, progress)
+            void Effect.runPromise(PubSub.publish(sqliteProgress, progress))
+          },
+        }),
+      )
 
-        yield* PubSub.publish(sqliteProgress, { type: "Done" })
-        yield* Deferred.succeed(sqliteDone, undefined)
-      })
-    }
-
-    if (needsMigration && sqliteDone) {
-      yield* Deferred.await(sqliteDone)
+      yield* PubSub.publish(sqliteProgress, { type: "Done" })
     }
 
     logger.log("spawning sidecar", { url })
@@ -201,16 +189,13 @@ const initialize = Effect.fn("Main.initialize")(function* () {
     return overlay
   }).pipe(Effect.map(Option.fromNullishOr))
 
-  const listener = yield* Fiber.join(loadingFiber)
+  yield* Fiber.join(loadingFiber)
   yield* SubscriptionRef.set(initStep, InitStep.Done())
 
-  yield* Option.match(overlay, {
-    onSome: Effect.fnUntraced(function* (overlay) {
-      yield* Deferred.await(loadingComplete)
-      overlay.close()
-    }),
-    onNone: () => Effect.void,
-  })
+  if (Option.isSome(overlay)) {
+    yield* Deferred.await(loadingComplete)
+    overlay.value.close()
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -219,7 +204,7 @@ const initialize = Effect.fn("Main.initialize")(function* () {
 
 const logger = initLogging()
 
-const shutdownEffect = Effect.gen(function* () {
+const shutdown = Effect.gen(function* () {
   yield* stopServer(server)
   app.exit(0)
 })
@@ -244,7 +229,7 @@ const registerAppEventListeners = (appEvents: PubSub.PubSub<AppEvent>) => () => 
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
-      void Effect.runPromise(shutdownEffect)
+      void Effect.runPromise(shutdown)
     })
   }
 }
@@ -293,30 +278,30 @@ const main = Effect.gen(function* () {
   setDockIcon()
   setupAutoUpdater()
 
-  registerIpcHandlersEffect()
+  registerIpcHandlersImpl()
 
   yield* initialize()
 
   const mainWindow = createMainWindow()
   wireMenu(mainWindow)
 
-  yield* Stream.fromPubSub(appEvents).pipe(
-    Stream.runForEach((event) => handleAppEvent(event, deepLinkQueue, mainWindow, server)),
-    Effect.forkChild,
-  )
-
-  yield* Deferred.await(deepLinksConsumed).pipe(
-    Effect.andThen(
-      Stream.fromQueue(deepLinkQueue).pipe(
-        Stream.runForEach((urls) => Effect.sync(() => sendDeepLinks(mainWindow, urls))),
+  yield* Effect.all(
+    [
+      Stream.fromPubSub(appEvents).pipe(
+        Stream.runForEach((event) => handleAppEvent(event, deepLinkQueue, mainWindow, server)),
       ),
-    ),
-    Effect.forkChild,
-  )
-
-  yield* Stream.fromPubSub(menuCommands).pipe(
-    Stream.runForEach((id) => Effect.sync(() => sendMenuCommand(mainWindow, id))),
-    Effect.forkChild,
+      Deferred.await(deepLinksConsumed).pipe(
+        Effect.andThen(
+          Stream.fromQueue(deepLinkQueue).pipe(
+            Stream.runForEach((urls) => Effect.sync(() => sendDeepLinks(mainWindow, urls))),
+          ),
+        ),
+      ),
+      Stream.fromPubSub(menuCommands).pipe(
+        Stream.runForEach((id) => Effect.sync(() => sendMenuCommand(mainWindow, id))),
+      ),
+    ],
+    { concurrency: "unbounded" },
   )
 }).pipe(
   Effect.catch((error) =>
@@ -328,10 +313,6 @@ const main = Effect.gen(function* () {
 )
 
 void Effect.runPromise(main)
-
-// ---------------------------------------------------------------------------
-// Menu wiring
-// ---------------------------------------------------------------------------
 
 const wireMenu = (win: BrowserWindow) => {
   createMenu({
@@ -354,31 +335,26 @@ const wireMenu = (win: BrowserWindow) => {
   })
 }
 
-// ---------------------------------------------------------------------------
-// IPC handlers
-// ---------------------------------------------------------------------------
-
-const registerIpcHandlersEffect = () =>
+const registerIpcHandlersImpl = () =>
   registerIpcHandlers({
     killSidecar: () => Effect.runPromise(stopServer(server)),
     awaitInitialization: (sendStep) =>
       Effect.runPromise(
         Effect.gen(function* () {
-          const currentStep = SubscriptionRef.getUnsafe(initStep)
+          const currentStep = yield* SubscriptionRef.get(initStep)
           sendStep(currentStep)
 
-          const fiber = yield* SubscriptionRef.changes(initStep).pipe(
+          yield* SubscriptionRef.changes(initStep).pipe(
             Stream.runForEach((step) => Effect.sync(() => sendStep(step))),
-            Effect.forkChild,
+            Effect.forkScoped,
           )
 
           logger.log("awaiting server ready")
           const res = yield* Deferred.await(serverReady)
           logger.log("server ready", { url: res.url })
 
-          yield* Fiber.interrupt(fiber)
           return res
-        }),
+        }).pipe(Effect.scoped),
       ),
     getWindowConfig: () => ({ updaterEnabled: UPDATER_ENABLED }),
     consumeInitialDeepLinks: () =>
@@ -405,38 +381,36 @@ const registerIpcHandlersEffect = () =>
     setBackgroundColor,
   })
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-const getSidecarPort = Effect.promise(() => {
+const getSidecarPort = Effect.gen(function* () {
   const fromEnv = process.env.OPENCODE_PORT
   if (fromEnv) {
     const parsed = Number.parseInt(fromEnv, 10)
-    if (!Number.isNaN(parsed)) return Promise.resolve(parsed)
+    if (!Number.isNaN(parsed)) return parsed
   }
 
-  return new Promise<number>((resolve, reject) => {
-    const server = createServer()
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (typeof address !== "object" || !address) {
-        server.close()
-        reject(new Error("Failed to get port"))
-        return
-      }
-      const port = address.port
-      server.close(() => resolve(port))
-    })
+  const deferred = yield* Deferred.make<number, string>()
+
+  const server = createServer()
+  server.on("error", (e) => Deferred.failSync(deferred, () => e.toString()))
+  server.listen(0, "127.0.0.1", () => {
+    const address = server.address()
+    if (typeof address !== "object" || !address) {
+      server.close()
+      Deferred.failSync(deferred, () => "Failed to get port")
+      return
+    }
+    const port = address.port
+    server.close(() => Effect.runSync(Deferred.succeed(deferred, port)))
   })
+
+  return yield* Deferred.await(deferred)
 })
 
-const sqliteFileExists = Effect.sync(() => {
+const sqliteFileExists = () => {
   const xdg = process.env.XDG_DATA_HOME
   const base = xdg && xdg.length > 0 ? xdg : join(homedir(), ".local", "share")
   return existsSync(join(base, "opencode", "opencode.db"))
-})
+}
 
 function setupAutoUpdater() {
   if (!UPDATER_ENABLED) return
