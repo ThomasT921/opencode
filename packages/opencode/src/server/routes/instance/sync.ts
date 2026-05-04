@@ -112,33 +112,6 @@ export const SyncRoutes = lazy(() =>
       },
     )
     .post(
-      "/erase",
-      describeRoute({
-        summary: "Erase session sync events",
-        description: "Erase all locally stored sync events for a session aggregate.",
-        operationId: "sync.erase",
-        responses: {
-          200: {
-            description: "Erased session sync events",
-            content: {
-              "application/json": {
-                schema: resolver(SessionPayload),
-              },
-            },
-          },
-          ...errors(400),
-        },
-      }),
-      validator("json", SessionPayload),
-      async (c) => {
-        const body = c.req.valid("json")
-        SyncEvent.remove(body.sessionID)
-        return c.json({
-          sessionID: body.sessionID,
-        })
-      },
-    )
-    .post(
       "/steal",
       describeRoute({
         summary: "Steal session into workspace",

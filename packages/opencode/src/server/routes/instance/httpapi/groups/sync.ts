@@ -37,7 +37,6 @@ export const HistoryEvent = Schema.Struct({
 export const SyncPaths = {
   start: `${root}/start`,
   replay: `${root}/replay`,
-  erase: `${root}/erase`,
   steal: `${root}/steal`,
   history: `${root}/history`,
 } as const
@@ -64,17 +63,6 @@ export const SyncApi = HttpApi.make("sync")
             identifier: "sync.replay",
             summary: "Replay sync events",
             description: "Validate and replay a complete sync event history.",
-          }),
-        ),
-        HttpApiEndpoint.post("erase", SyncPaths.erase, {
-          payload: SessionPayload,
-          success: described(SessionPayload, "Erased session sync events"),
-          error: HttpApiError.BadRequest,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "sync.erase",
-            summary: "Erase session sync events",
-            description: "Erase all locally stored sync events for a session aggregate.",
           }),
         ),
         HttpApiEndpoint.post("steal", SyncPaths.steal, {

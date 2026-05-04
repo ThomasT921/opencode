@@ -518,42 +518,26 @@ export const layer = Layer.effect(
         if (current?.workspaceID) {
           const previous = yield* get(current.workspaceID)
           if (previous) {
-            yield* Effect.gen(function* () {
-              const adaptor = getAdaptor(previous.projectID, previous.type)
-              const target = yield* Effect.promise(() => Promise.resolve(adaptor.target(previous)))
-              if (target.type === "local") return
+            const adaptor = getAdaptor(previous.projectID, previous.type)
+            const target = yield* Effect.promise(() => Promise.resolve(adaptor.target(previous)))
 
-              const response = yield* http.execute(
-                HttpClientRequest.post(route(target.url, "/sync/erase"), {
-                  headers: new Headers(target.headers),
-                  body: HttpBody.jsonUnsafe({ sessionID: input.sessionID }),
-                }),
+            if (target.type === "remote") {
+              yield* syncHistory(previous, target.url, target.headers).pipe(
+                Effect.catch((error) =>
+                  Effect.sync(() => {
+                    log.warn("session warp final source sync failed", {
+                      workspaceID: previous.id,
+                      sessionID: input.sessionID,
+                      error: errorData(error),
+                    })
+                  }),
+                ),
               )
+            }
 
-              // TODO: if this fails, we need to mark this workspace
-              // as "orphaned" meaning we abandoned it and never want
-              // to talk to it again
-
-              if (response.status < 200 || response.status >= 300) {
-                const body = yield* response.text
-                log.warn("session warp erase failed", {
-                  workspaceID: previous.id,
-                  sessionID: input.sessionID,
-                  status: response.status,
-                  body,
-                })
-              }
-            }).pipe(
-              Effect.catch((error) =>
-                Effect.sync(() => {
-                  log.warn("session warp erase unavailable", {
-                    workspaceID: previous.id,
-                    sessionID: input.sessionID,
-                    error,
-                  })
-                }),
-              ),
-            )
+            // "claim" this session so any future events coming from
+            // the old workspace are ignored
+            SyncEvent.claim(input.sessionID, input.workspaceID)
           }
         }
 

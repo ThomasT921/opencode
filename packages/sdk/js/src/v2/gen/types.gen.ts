@@ -4611,38 +4611,6 @@ export type SyncReplayResponses = {
 
 export type SyncReplayResponse = SyncReplayResponses[keyof SyncReplayResponses]
 
-export type SyncEraseData = {
-  body?: {
-    sessionID: string
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/sync/erase"
-}
-
-export type SyncEraseErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-}
-
-export type SyncEraseError = SyncEraseErrors[keyof SyncEraseErrors]
-
-export type SyncEraseResponses = {
-  /**
-   * Erased session sync events
-   */
-  200: {
-    sessionID: string
-  }
-}
-
-export type SyncEraseResponse = SyncEraseResponses[keyof SyncEraseResponses]
-
 export type SyncStealData = {
   body?: {
     sessionID: string

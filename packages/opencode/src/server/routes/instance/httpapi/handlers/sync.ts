@@ -36,11 +36,6 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
       return { sessionID: events[0].aggregateID }
     })
 
-    const erase = Effect.fn("SyncHttpApi.erase")(function* (ctx: { payload: typeof SessionPayload.Type }) {
-      SyncEvent.remove(ctx.payload.sessionID)
-      return { sessionID: ctx.payload.sessionID }
-    })
-
     const steal = Effect.fn("SyncHttpApi.steal")(function* (ctx: { payload: typeof SessionPayload.Type }) {
       const instance = yield* InstanceState.context
       const workspaceID = yield* InstanceState.workspaceID
@@ -83,7 +78,6 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     return handlers
       .handle("start", start)
       .handle("replay", replay)
-      .handle("erase", erase)
       .handle("steal", steal)
       .handle("history", history)
   }),

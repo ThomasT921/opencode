@@ -160,8 +160,6 @@ import type {
   SessionUpdateErrors,
   SessionUpdateResponses,
   SubtaskPartInput,
-  SyncEraseErrors,
-  SyncEraseResponses,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
   SyncReplayErrors,
@@ -3167,43 +3165,6 @@ export class Sync extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SyncReplayResponses, SyncReplayErrors, ThrowOnError>({
       url: "/sync/replay",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
-  /**
-   * Erase session sync events
-   *
-   * Erase all locally stored sync events for a session aggregate.
-   */
-  public erase<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-      sessionID?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "body", key: "sessionID" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<SyncEraseResponses, SyncEraseErrors, ThrowOnError>({
-      url: "/sync/erase",
       ...options,
       ...params,
       headers: {

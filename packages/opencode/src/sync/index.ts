@@ -121,7 +121,7 @@ export function project<Def extends Definition>(
   return [def, func as ProjectorFunc]
 }
 
-function process<Def extends Definition>(def: Def, event: Event<Def>, options: { publish: boolean }) {
+function process<Def extends Definition>(def: Def, event: Event<Def>, options: { publish: boolean; ownerID?: string }) {
   if (projectors == null) {
     throw new Error("No projectors available. Call `SyncEvent.init` to install projectors")
   }
@@ -131,8 +131,6 @@ function process<Def extends Definition>(def: Def, event: Event<Def>, options: {
     throw new Error(`Projector not found for event: ${def.type}`)
   }
 
-  // idempotent: need to ignore any events already logged
-
   Database.transaction((tx) => {
     projector(tx, event.data)
 
@@ -141,6 +139,7 @@ function process<Def extends Definition>(def: Def, event: Event<Def>, options: {
         .values({
           aggregate_id: event.aggregateID,
           seq: event.seq,
+          owner_id: options?.ownerID,
         })
         .onConflictDoUpdate({
           target: EventSequenceTable.aggregate_id,
@@ -185,7 +184,7 @@ function process<Def extends Definition>(def: Def, event: Event<Def>, options: {
   })
 }
 
-export function replay(event: SerializedEvent, options?: { publish: boolean }) {
+export function replay(event: SerializedEvent, options?: { publish: boolean; ownerID?: string }) {
   const def = registry.get(event.type)
   if (!def) {
     throw new Error(`Unknown event type: ${event.type}`)
@@ -193,7 +192,7 @@ export function replay(event: SerializedEvent, options?: { publish: boolean }) {
 
   const row = Database.use((db) =>
     db
-      .select({ seq: EventSequenceTable.seq })
+      .select({ seq: EventSequenceTable.seq, ownerID: EventSequenceTable.owner_id })
       .from(EventSequenceTable)
       .where(eq(EventSequenceTable.aggregate_id, event.aggregateID))
       .get(),
@@ -204,12 +203,16 @@ export function replay(event: SerializedEvent, options?: { publish: boolean }) {
     return
   }
 
+  if (row?.ownerID && row.ownerID !== options?.ownerID) {
+    return
+  }
+
   const expected = latest + 1
   if (event.seq !== expected) {
     throw new Error(`Sequence mismatch for aggregate "${event.aggregateID}": expected ${expected}, got ${event.seq}`)
   }
 
-  process(def, event, { publish: !!options?.publish })
+  process(def, event, { publish: !!options?.publish, ownerID: options?.ownerID ?? row?.ownerID ?? undefined })
 }
 
 export function replayAll(events: SerializedEvent[], options?: { publish: boolean }) {
@@ -272,6 +275,16 @@ export function remove(aggregateID: string) {
     tx.delete(EventSequenceTable).where(eq(EventSequenceTable.aggregate_id, aggregateID)).run()
     tx.delete(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).run()
   })
+}
+
+export function claim(aggregateID: string, ownerID: string) {
+  Database.use((db) =>
+    db
+      .update(EventSequenceTable)
+      .set({ owner_id: ownerID })
+      .where(eq(EventSequenceTable.aggregate_id, aggregateID))
+      .run(),
+  )
 }
 
 export function payloads() {
