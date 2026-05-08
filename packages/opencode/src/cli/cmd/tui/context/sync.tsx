@@ -119,6 +119,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const kv = useKV()
 
     const fullSyncedSessions = new Set<string>()
+    const optimisticMessages = new Set<string>()
 
     function sessionListQuery(): { scope?: "project"; path?: string } {
       if (!kv.get("session_directory_filter_enabled", true)) return { scope: "project" }
@@ -257,6 +258,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "message.updated": {
+          optimisticMessages.delete(event.properties.info.id)
           const messages = store.message[event.properties.info.sessionID]
           if (!messages) {
             setStore("message", event.properties.info.sessionID, [event.properties.info])
@@ -296,6 +298,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
         case "message.removed": {
+          optimisticMessages.delete(event.properties.messageID)
           const messages = store.message[event.properties.sessionID]
           const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
           if (result.found) {
@@ -532,6 +535,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           variant?: string
           parts: OptimisticPromptPart[]
         }) {
+          optimisticMessages.add(input.messageID)
           const messages = store.message[input.sessionID]
           const match = messages ? Binary.search(messages, input.messageID, (m) => m.id) : undefined
           const info: Message = {
@@ -552,14 +556,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               sessionID: input.sessionID,
               messageID: input.messageID,
             }
-            if (withIDs.type !== "text") return withIDs
-            return {
-              ...withIDs,
-              metadata: {
-                ...withIDs.metadata,
-                optimistic: true,
-              },
+            if (withIDs.type === "file") {
+              return {
+                ...withIDs,
+                url: "",
+              }
             }
+            return withIDs
           })
 
           batch(() => {
@@ -570,7 +573,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 "message",
                 input.sessionID,
                 produce((draft) => {
-                  draft.splice(match?.index ?? draft.length, 0, info)
+                  Binary.insert(draft, info, (message) => message.id)
                 }),
               )
             }
@@ -578,12 +581,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           })
         },
         removeOptimisticPrompt(sessionID: string, messageID: string) {
-          if (!store.part[messageID]?.some((part) => part.type === "text" && part.metadata?.optimistic === true)) return
+          if (!optimisticMessages.delete(messageID)) return
           const messages = store.message[sessionID]
-          if (!messages) return
-          const match = Binary.search(messages, messageID, (m) => m.id)
+          const match = messages ? Binary.search(messages, messageID, (m) => m.id) : undefined
           batch(() => {
-            if (match.found) {
+            if (match?.found) {
               setStore(
                 "message",
                 sessionID,
@@ -611,12 +613,20 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           setStore(
             produce((draft) => {
               const match = Binary.search(draft.session, sessionID, (s) => s.id)
+              const fetched = messages.data!
+              const fetchedIDs = new Set(fetched.map((message) => message.info.id))
+              const optimistic = (draft.message[sessionID] ?? []).filter(
+                (message) => optimisticMessages.has(message.id) && !fetchedIDs.has(message.id),
+              )
               if (match.found) draft.session[match.index] = session.data!
               if (!match.found) draft.session.splice(match.index, 0, session.data!)
               draft.todo[sessionID] = todo.data ?? []
-              const infos: (typeof draft.message)[string] = []
-              for (const message of messages.data ?? []) {
-                infos.push(message.info)
+              const infos: (typeof draft.message)[string] = fetched.map((message) => message.info)
+              for (const message of optimistic) {
+                Binary.insert(infos, message, (item) => item.id)
+              }
+              for (const message of fetched) {
+                optimisticMessages.delete(message.info.id)
                 draft.part[message.info.id] = message.parts
               }
               draft.message[sessionID] = infos

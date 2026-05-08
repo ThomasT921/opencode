@@ -1187,25 +1187,18 @@ export function Prompt(props: PromptProps) {
         },
         ...nonTextParts.map(assign),
       ]
-      sync.session.addOptimisticPrompt({
+      const request = {
         sessionID,
         messageID,
         agent: agent.name,
         model: selectedModel,
         variant,
         parts,
-      })
+      }
+      sync.session.addOptimisticPrompt(request)
       sdk.client.session
-        .prompt({
-          sessionID,
-          ...selectedModel,
-          messageID,
-          agent: agent.name,
-          model: selectedModel,
-          variant,
-          parts,
-        })
-        .catch(() => sync.session.removeOptimisticPrompt(sessionID, messageID))
+        .prompt(request)
+        .catch(() => sync.session.removeOptimisticPrompt(request.sessionID, request.messageID))
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({
