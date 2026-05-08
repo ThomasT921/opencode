@@ -469,7 +469,15 @@ describe("workspace CRUD", () => {
       expect(recorded.calls.configure).toHaveLength(1)
       expect(recorded.calls.configure[0]).toMatchObject({ id: workspaceID, type, directory: null })
       expect(recorded.calls.create).toHaveLength(1)
-      expect(recorded.calls.create[0].info).toEqual(info)
+      expect(recorded.calls.create[0].info).toEqual({
+        id: workspaceID,
+        type,
+        branch: "configured-branch",
+        name: "Configured Name",
+        directory: targetDir,
+        extra: { configured: true },
+        projectID: Instance.project.id,
+      })
       expect(JSON.parse(recorded.calls.create[0].env.OPENCODE_AUTH_CONTENT ?? "{}")).toEqual({
         test: { type: "api", key: "secret" },
       })
@@ -953,35 +961,29 @@ describe("workspace sync state", () => {
     })
   })
 
-  test("startWorkspaceSyncing starts only workspaces with sessions", async () => {
+  test("startWorkspaceSyncing starts all workspaces", async () => {
     await withInstance(async (dir) => {
-      const withSessionType = unique("with-session")
-      const withoutSessionType = unique("without-session")
-      const withSession = workspaceInfo(Instance.project.id, withSessionType)
-      const withoutSession = workspaceInfo(Instance.project.id, withoutSessionType)
-      const withSessionDir = path.join(dir, "with-session")
-      const withoutSessionDir = path.join(dir, "without-session")
-      await fs.mkdir(withSessionDir, { recursive: true })
-      await fs.mkdir(withoutSessionDir, { recursive: true })
-      insertWorkspace(withSession)
-      insertWorkspace(withoutSession)
-      registerAdapter(Instance.project.id, withSessionType, localAdapter(withSessionDir).adapter)
-      registerAdapter(Instance.project.id, withoutSessionType, localAdapter(withoutSessionDir).adapter)
-      attachSessionToWorkspace(
-        (await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))).id,
-        withSession.id,
-      )
+      const firstType = unique("first")
+      const secondType = unique("second")
+      const first = workspaceInfo(Instance.project.id, firstType)
+      const second = workspaceInfo(Instance.project.id, secondType)
+      await fs.mkdir(path.join(dir, "first"), { recursive: true })
+      await fs.mkdir(path.join(dir, "second"), { recursive: true })
+      insertWorkspace(first)
+      insertWorkspace(second)
+      registerAdapter(Instance.project.id, firstType, localAdapter(path.join(dir, "first")).adapter)
+      registerAdapter(Instance.project.id, secondType, localAdapter(path.join(dir, "second")).adapter)
 
       startWorkspaceSyncing(Instance.project.id)
 
       await eventually(() =>
-        workspaceStatus().then((status) =>
-          expect(status.find((item) => item.workspaceID === withSession.id)?.status).toBe("connected"),
-        ),
+        workspaceStatus().then((status) => {
+          expect(status.find((item) => item.workspaceID === first.id)?.status).toBe("connected")
+          expect(status.find((item) => item.workspaceID === second.id)?.status).toBe("connected")
+        }),
       )
-      expect((await workspaceStatus()).find((item) => item.workspaceID === withoutSession.id)?.status).toBeUndefined()
-      await removeWorkspace(withSession.id)
-      await removeWorkspace(withoutSession.id)
+      await removeWorkspace(first.id)
+      await removeWorkspace(second.id)
     })
   })
 
