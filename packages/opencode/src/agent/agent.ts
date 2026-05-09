@@ -1,4 +1,5 @@
 import { Config } from "@/config/config"
+import { ConfigReference } from "@/config/reference"
 import z from "zod"
 import { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
@@ -26,9 +27,6 @@ import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { zod } from "@/util/effect-zod"
 import { withStatics, type DeepMutable } from "@/util/schema"
-
-type ReferenceEntry = NonNullable<Config.Info["reference"]>[string]
-type ResolvedReference = { kind: "git"; repository: string; branch?: string } | { kind: "local"; path: string }
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -303,25 +301,7 @@ export const layer = Layer.effect(
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
 
-        function referencePath(value: string) {
-          if (value.startsWith("~/")) return path.join(Global.Path.home, value.slice(2))
-          return path.isAbsolute(value)
-            ? value
-            : path.resolve(ctx.worktree === "/" ? ctx.directory : ctx.worktree, value)
-        }
-
-        function resolveReference(reference: ReferenceEntry): ResolvedReference {
-          if (typeof reference === "string") {
-            if (reference.startsWith(".") || reference.startsWith("/") || reference.startsWith("~")) {
-              return { kind: "local", path: referencePath(reference) }
-            }
-            return { kind: "git", repository: reference }
-          }
-          if ("path" in reference) return { kind: "local", path: referencePath(reference.path) }
-          return { kind: "git", repository: reference.repository, branch: reference.branch }
-        }
-
-        function referencePrompt(name: string, reference: ResolvedReference) {
+        function referencePrompt(name: string, reference: ConfigReference.Resolved) {
           if (reference.kind === "local") {
             return [
               PROMPT_SCOUT,
@@ -343,14 +323,27 @@ export const layer = Layer.effect(
         if (Flag.OPENCODE_EXPERIMENTAL_SCOUT) {
           for (const [name, reference] of Object.entries(cfg.reference ?? {})) {
             if (agents[name]) continue
-            const resolved = resolveReference(reference)
+            const resolved = ConfigReference.resolve(reference, ctx)
             const localPath = resolved.kind === "local" ? resolved.path : undefined
+            agents.scout.permission = Permission.merge(
+              agents.scout.permission,
+              Permission.fromConfig(
+                localPath
+                  ? {
+                      external_directory: {
+                        [localPath]: "allow",
+                        [path.join(localPath, "*")]: "allow",
+                      },
+                    }
+                  : {},
+              ),
+            )
             agents[name] = {
               name,
               description:
                 resolved.kind === "local"
-                  ? `Scout reference for local directory ${resolved.path}`
-                  : `Scout reference for repository ${resolved.repository}`,
+                  ? `Reference alias for Scout using local directory ${resolved.path}`
+                  : `Reference alias for Scout using repository ${resolved.repository}`,
               permission: Permission.merge(
                 agents.scout.permission,
                 Permission.fromConfig(

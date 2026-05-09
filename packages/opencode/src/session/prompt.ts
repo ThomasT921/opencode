@@ -32,6 +32,7 @@ import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
+import { ConfigReference } from "@/config/reference"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { SessionProcessor } from "./processor"
@@ -1239,8 +1240,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (part.type === "agent") {
-          const perm = Permission.evaluate("task", part.name, ag.permission)
+          const cfg = yield* config.get()
+          const reference = Flag.OPENCODE_EXPERIMENTAL_SCOUT
+            ? cfg.reference?.[part.name]
+              ? ConfigReference.resolve(cfg.reference[part.name], yield* InstanceState.context)
+              : undefined
+            : undefined
+          const target = reference ? "scout" : part.name
+          const perm = Permission.evaluate("task", target, ag.permission)
           const hint = perm.action === "deny" ? " . Invoked by user; guaranteed to exist." : ""
+          const referencePrompt = reference
+            ? ConfigReference.prompt(part.name, reference) +
+              "\nCall the task tool with subagent: scout. Do not call a subagent or skill named " +
+              part.name +
+              "."
+            : undefined
           return [
             { ...part, messageID: info.id, sessionID: input.sessionID },
             {
@@ -1249,8 +1263,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               type: "text",
               synthetic: true,
               text:
+                (referencePrompt ? referencePrompt + "\n" : "") +
                 " Use the above message and context to generate a prompt and call the task tool with subagent: " +
-                part.name +
+                target +
                 hint,
             },
           ]

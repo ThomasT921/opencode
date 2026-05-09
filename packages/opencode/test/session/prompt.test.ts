@@ -24,6 +24,7 @@ import { SessionMessageTable } from "../../src/session/session.sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
@@ -87,6 +88,21 @@ function withSh<A, E, R>(fx: () => Effect.Effect<A, E, R>) {
         if (prev === undefined) delete process.env.SHELL
         else process.env.SHELL = prev
         Shell.preferred.reset()
+      }),
+  )
+}
+
+function withScout<A, E, R>(fx: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const prev = Flag.OPENCODE_EXPERIMENTAL_SCOUT
+      Flag.OPENCODE_EXPERIMENTAL_SCOUT = true
+      return prev
+    }),
+    () => fx,
+    (prev) =>
+      Effect.sync(() => {
+        Flag.OPENCODE_EXPERIMENTAL_SCOUT = prev
       }),
   )
 }
@@ -414,6 +430,51 @@ it.live("prompt emits v2 prompted and synthetic events", () =>
       )
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+it.live("reference mentions route through scout", () =>
+  provideTmpdirServer(
+    () =>
+      withScout(
+        Effect.gen(function* () {
+          const prompt = yield* SessionPrompt.Service
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({ title: "Pinned" })
+
+          const result = yield* prompt.prompt({
+            sessionID: chat.id,
+            agent: "build",
+            noReply: true,
+            parts: [
+              { type: "text", text: "@effect audit this code" },
+              {
+                type: "agent",
+                name: "effect",
+                source: { value: "@effect", start: 0, end: 7 },
+              },
+            ],
+          })
+
+          const synthetic = result.parts.findLast((part) => part.type === "text" && part.synthetic)
+          expect(synthetic?.type).toBe("text")
+          if (synthetic?.type !== "text") return
+          expect(synthetic.text).toContain("@effect is a configured Scout reference")
+          expect(synthetic.text).toContain("Repository: Effect-TS/effect")
+          expect(synthetic.text).toContain("subagent: scout")
+          expect(synthetic.text).toContain("Do not call a subagent or skill named effect")
+          expect(synthetic.text).not.toContain("subagent: effect")
+        }),
+      ),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        reference: {
+          effect: "Effect-TS/effect",
+        },
+      }),
+    },
   ),
 )
 
