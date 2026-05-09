@@ -2,16 +2,14 @@ import { Auth } from "@/auth"
 import { ProviderID } from "@/provider/schema"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { withWorkspaceRouting } from "../query"
 import { described } from "./metadata"
 
 const AuthParams = Schema.Struct({
   providerID: ProviderID,
 })
 
-const LogQuery = Schema.Struct({
-  directory: Schema.optional(Schema.String),
-  workspace: Schema.optional(Schema.String),
-})
+const LogQuery = withWorkspaceRouting({})
 
 export const LogInput = Schema.Struct({
   service: Schema.String.annotate({ description: "Service name for the log entry" }),

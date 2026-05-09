@@ -9,6 +9,7 @@ import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "e
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware } from "../middleware/workspace-routing"
+import { withWorkspaceRouting } from "../query"
 import { described } from "./metadata"
 
 const ConsoleStateResponse = Schema.Struct({
@@ -42,7 +43,7 @@ const ToolListItem = Schema.Struct({
   parameters: Schema.Unknown,
 }).annotate({ identifier: "ToolListItem" })
 const ToolList = Schema.Array(ToolListItem).annotate({ identifier: "ToolList" })
-export const ToolListQuery = Schema.Struct({
+export const ToolListQuery = withWorkspaceRouting({
   provider: ProviderID,
   model: ModelID,
 })
@@ -54,7 +55,7 @@ const QueryBoolean = Schema.Literals(["true", "false"]).pipe(
   }),
 )
 const WorktreeList = Schema.Array(Schema.String)
-export const SessionListQuery = Schema.Struct({
+export const SessionListQuery = withWorkspaceRouting({
   directory: Schema.optional(Schema.String),
   roots: Schema.optional(QueryBoolean),
   start: Schema.optional(Schema.NumberFromString),

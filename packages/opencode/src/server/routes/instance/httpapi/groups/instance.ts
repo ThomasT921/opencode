@@ -9,6 +9,7 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware } from "../middleware/workspace-routing"
+import { withWorkspaceRouting } from "../query"
 import { described } from "./metadata"
 
 const PathInfo = Schema.Struct({
@@ -19,7 +20,7 @@ const PathInfo = Schema.Struct({
   directory: Schema.String,
 }).annotate({ identifier: "Path" })
 
-export const VcsDiffQuery = Schema.Struct({
+export const VcsDiffQuery = withWorkspaceRouting({
   mode: Vcs.Mode,
 })
 

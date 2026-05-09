@@ -6,12 +6,14 @@ import { SessionV2 } from "@/v2/session"
 import { Schema, SchemaGetter } from "effect"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../../middleware/authorization"
+import { WorkspaceRoutingQueryFields } from "../../query"
 
 export const SessionGroup = HttpApiGroup.make("v2.session")
   .add(
     HttpApiEndpoint.get("sessions", "/api/session", {
       query: Schema.Union([
         Schema.Struct({
+          ...WorkspaceRoutingQueryFields,
           limit: Schema.optional(
             Schema.NumberFromString.check(
               Schema.isInt(),
@@ -24,7 +26,6 @@ export const SessionGroup = HttpApiGroup.make("v2.session")
           order: Schema.optional(Schema.Union([Schema.Literal("asc"), Schema.Literal("desc")])).annotate({
             description: "Session order for the first page. Use desc for newest first or asc for oldest first.",
           }),
-          directory: Schema.String.pipe(Schema.optional),
           path: Schema.String.pipe(Schema.optional),
           workspace: WorkspaceID.pipe(Schema.optional),
           roots: Schema.Literals(["true", "false"])
@@ -40,6 +41,7 @@ export const SessionGroup = HttpApiGroup.make("v2.session")
           cursor: Schema.optional(Schema.Never),
         }),
         Schema.Struct({
+          ...WorkspaceRoutingQueryFields,
           limit: Schema.optional(
             Schema.NumberFromString.check(
               Schema.isInt(),
@@ -54,9 +56,7 @@ export const SessionGroup = HttpApiGroup.make("v2.session")
               "Opaque pagination cursor returned as cursor.previous or cursor.next in the previous response. Do not combine with order.",
           }),
           order: Schema.optional(Schema.Never),
-          directory: Schema.optional(Schema.Never),
           path: Schema.optional(Schema.Never),
-          workspace: Schema.optional(Schema.Never),
           roots: Schema.optional(Schema.Never),
           start: Schema.optional(Schema.Never),
           search: Schema.optional(Schema.Never),

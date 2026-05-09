@@ -15,6 +15,7 @@ import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, Op
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware } from "../middleware/workspace-routing"
+import { withWorkspaceRouting } from "../query"
 import { ApiNotFoundError } from "../errors"
 import { described } from "./metadata"
 
@@ -25,7 +26,7 @@ const QueryBoolean = Schema.Literals(["true", "false"]).pipe(
     encode: SchemaGetter.transform((value) => (value ? "true" : "false")),
   }),
 )
-export const ListQuery = Schema.Struct({
+export const ListQuery = withWorkspaceRouting({
   directory: Schema.optional(Schema.String),
   scope: Schema.optional(Schema.Literals(["project"])),
   path: Schema.optional(Schema.String),
@@ -34,8 +35,8 @@ export const ListQuery = Schema.Struct({
   search: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
 })
-export const DiffQuery = Schema.Struct(Struct.omit(SessionSummary.DiffInput.fields, ["sessionID"]))
-export const MessagesQuery = Schema.Struct({
+export const DiffQuery = withWorkspaceRouting(Struct.omit(SessionSummary.DiffInput.fields, ["sessionID"]))
+export const MessagesQuery = withWorkspaceRouting({
   limit: Schema.optional(Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
   before: Schema.optional(Schema.String),
 })

@@ -3,6 +3,7 @@ import { SessionMessage } from "@/v2/session-message"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../../middleware/authorization"
+import { WorkspaceRoutingQueryFields } from "../../query"
 
 export const MessageGroup = HttpApiGroup.make("v2.message")
   .add(
@@ -10,6 +11,7 @@ export const MessageGroup = HttpApiGroup.make("v2.message")
       params: { sessionID: SessionID },
       query: Schema.Union([
         Schema.Struct({
+          ...WorkspaceRoutingQueryFields,
           limit: Schema.optional(
             Schema.NumberFromString.check(
               Schema.isInt(),
@@ -26,6 +28,7 @@ export const MessageGroup = HttpApiGroup.make("v2.message")
           cursor: Schema.optional(Schema.Never),
         }),
         Schema.Struct({
+          ...WorkspaceRoutingQueryFields,
           limit: Schema.optional(
             Schema.NumberFromString.check(
               Schema.isInt(),

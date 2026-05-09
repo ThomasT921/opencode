@@ -6,17 +6,18 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware } from "../middleware/workspace-routing"
+import { withWorkspaceRouting } from "../query"
 import { described } from "./metadata"
 
-export const FileQuery = Schema.Struct({
+export const FileQuery = withWorkspaceRouting({
   path: Schema.String,
 })
 
-export const FindTextQuery = Schema.Struct({
+export const FindTextQuery = withWorkspaceRouting({
   pattern: Schema.String,
 })
 
-export const FindFileQuery = Schema.Struct({
+export const FindFileQuery = withWorkspaceRouting({
   query: Schema.String,
   dirs: Schema.optional(Schema.Literals(["true", "false"])),
   type: Schema.optional(Schema.Literals(["file", "directory"])),
@@ -25,7 +26,7 @@ export const FindFileQuery = Schema.Struct({
   ),
 })
 
-export const FindSymbolQuery = Schema.Struct({
+export const FindSymbolQuery = withWorkspaceRouting({
   query: Schema.String,
 })
 

@@ -165,4 +165,28 @@ describe("session messages endpoint", () => {
       }),
     )
   })
+
+  test("accepts workspace routing query params with paginated message requests", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      WithInstance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({})
+          await fill(session.id, 1)
+          const app = Server.Default().app
+
+          const directory = await app.request(
+            `/session/${session.id}/message?limit=80&directory=${encodeURIComponent(tmp.path)}`,
+          )
+          const workspace = await app.request(`/session/${session.id}/message?limit=80&workspace=wrk_test`)
+
+          expect(directory.status).toBe(200)
+          expect(workspace.status).toBe(200)
+
+          await svc.remove(session.id)
+        },
+      }),
+    )
+  })
 })

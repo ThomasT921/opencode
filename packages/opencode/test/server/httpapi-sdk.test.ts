@@ -331,18 +331,36 @@ describe("HttpApi SDK", () => {
 
   httpapi(
     "uses the generated SDK for safe instance routes",
-    withProject("raw", { git: false, setup: writeStandardFiles }, ({ sdk }) =>
+    withProject("raw", { setup: writeStandardFiles }, ({ sdk }) =>
       Effect.gen(function* () {
         const file = yield* call(() => sdk.file.read({ path: "hello.txt" }))
+        const files = yield* call(() => sdk.file.list({ path: "." }))
+        const status = yield* call(() => sdk.file.status())
+        const findText = yield* call(() => sdk.find.text({ pattern: "sdk-parity" }))
+        const findFiles = yield* call(() => sdk.find.files({ query: "hello", limit: 10 }))
+        const findSymbols = yield* call(() => sdk.find.symbols({ query: "hello" }))
         const session = yield* call(() => sdk.session.create({ title: "sdk" }))
         const listed = yield* call(() => sdk.session.list({ roots: true, limit: 10 }))
+        const messages = yield* call(() => sdk.session.messages({ sessionID: String(record(session.data).id), limit: 1 }))
+        const diff = yield* call(() => sdk.session.diff({ sessionID: String(record(session.data).id) }))
+        const vcsDiff = yield* call(() => sdk.vcs.diff({ mode: "git" }))
+        const tools = yield* call(() => sdk.tool.list({ provider: "opencode", model: "gpt-5" }))
 
         expect(file.response.status).toBe(200)
         expect(file.data).toMatchObject({ content: "hello" })
+        expect(files.response.status).toBe(200)
+        expect(status.response.status).toBe(200)
+        expect(findText.response.status).toBe(200)
+        expect(findFiles.response.status).toBe(200)
+        expect(findSymbols.response.status).toBe(200)
         expect(session.response.status).toBe(200)
         expect(session.data).toMatchObject({ title: "sdk" })
         expect(listed.response.status).toBe(200)
         expect(listed.data?.map((item) => item.id)).toContain(session.data?.id)
+        expect(messages.response.status).toBe(200)
+        expect(diff.response.status).toBe(200)
+        expect(vcsDiff.response.status).toBe(200)
+        expect(tools.response.status).toBe(200)
 
         yield* Effect.all([
           expectStatus(() => sdk.project.current(), 200),
@@ -464,9 +482,11 @@ describe("HttpApi SDK", () => {
         const fileStatus = yield* capture(() => sdk.file.status())
         const findFiles = yield* capture(() => sdk.find.files({ query: "hello", limit: 10 }))
         const findText = yield* capture(() => sdk.find.text({ pattern: "sdk-parity" }))
+        const vcsDiff = yield* capture(() => sdk.vcs.diff({ mode: "git" }))
         const agents = yield* capture(() => sdk.app.agents())
         const skills = yield* capture(() => sdk.app.skills())
         const tools = yield* capture(() => sdk.tool.ids())
+        const modelTools = yield* capture(() => sdk.tool.list({ provider: "opencode", model: "gpt-5" }))
         const vcs = yield* capture(() => sdk.vcs.get())
         const formatter = yield* capture(() => sdk.formatter.status())
         const lsp = yield* capture(() => sdk.lsp.status())
@@ -483,9 +503,11 @@ describe("HttpApi SDK", () => {
             fileStatus,
             findFiles,
             findText,
+            vcsDiff,
             agents,
             skills,
             tools,
+            modelTools,
             vcs,
             formatter,
             lsp,
@@ -515,6 +537,7 @@ describe("HttpApi SDK", () => {
         const all = yield* capture(() => sdk.session.list({ roots: false, limit: 10 }))
         const children = yield* capture(() => sdk.session.children({ sessionID: parentID }))
         const todo = yield* capture(() => sdk.session.todo({ sessionID: parentID }))
+        const diff = yield* capture(() => sdk.session.diff({ sessionID: parentID }))
         const status = yield* capture(() => sdk.session.status())
         const messages = yield* capture(() => sdk.session.messages({ sessionID: parentID }))
         const missingGet = yield* capture(() => sdk.session.get({ sessionID: "ses_missing" }))
@@ -535,6 +558,7 @@ describe("HttpApi SDK", () => {
             all,
             children,
             todo,
+            diff,
             status,
             messages,
             missingGet,
