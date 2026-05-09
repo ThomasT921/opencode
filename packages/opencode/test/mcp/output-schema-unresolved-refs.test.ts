@@ -108,6 +108,15 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
       }
       return { tools: this._state?.tools ?? [] }
     }
+    async request(req: { method: string }) {
+      // The fix retries via raw `request("tools/list", ...)` with a
+      // tolerant schema after the typed listTools() rejects on a bad
+      // outputSchema reference. The retry path bypasses the SDK's
+      // strict validator, so the mock returns the same tools list
+      // without the validation that originally threw.
+      if (req.method === "tools/list") return { tools: this._state?.tools ?? [] }
+      throw new Error(`unsupported request: ${req.method}`)
+    }
     async listPrompts() {
       return { prompts: [] }
     }
