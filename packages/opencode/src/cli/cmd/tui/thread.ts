@@ -142,6 +142,7 @@ export const TuiThreadCommand = cmd({
       }
       const cwd = Filesystem.resolve(process.cwd())
       const config = TuiConfig.get()
+      config.catch(() => {})
 
       if (args.demo) {
         const { createTuiDemo } = await import("./demo")

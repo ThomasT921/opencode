@@ -1573,8 +1573,14 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
     let spaces = 0
     let replaced = false
     let skipWhitespace = false
-    return chunks.map((chunk) => {
+    return chunks.flatMap((chunk) => {
+      const result: TextChunk[] = []
       let next = ""
+      const flush = () => {
+        if (!next) return
+        result.push(next === chunk.text ? chunk : { ...chunk, text: next })
+        next = ""
+      }
       for (const char of chunk.text) {
         if (skipWhitespace && (char === " " || char === "\t")) {
           skipWhitespace = false
@@ -1587,7 +1593,8 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
           continue
         }
         if (lineStart && !replaced && char === ">") {
-          next += "│ "
+          flush()
+          result.push({ __isChunk: true, text: "│ ", fg: theme.textMuted, attributes: TextAttributes.NONE })
           replaced = true
           skipWhitespace = true
           continue
@@ -1602,7 +1609,8 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
         }
         lineStart = false
       }
-      return next === chunk.text ? chunk : { ...chunk, text: next }
+      flush()
+      return result
     })
   }
   const trimCodeIndent = (value: string) => {

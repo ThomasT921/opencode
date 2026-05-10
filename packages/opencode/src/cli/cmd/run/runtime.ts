@@ -14,7 +14,7 @@
 //   4. runs the prompt queue until the footer closes.
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { createRunDemo } from "./demo"
+import type { createRunDemo } from "./demo"
 import { resolveDiffStyle, resolveFooterKeybinds, resolveModelInfo, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
 import { recordRunSpanError, setRunSpanAttributes, withRunSpan } from "./otel"
@@ -133,6 +133,10 @@ function variantsFor(providers: RunProvider[], model: RunInput["model"]) {
   }
 
   return Object.keys(providers.find((item) => item.id === model.providerID)?.models?.[model.modelID]?.variants ?? {})
+}
+
+async function createDemo(input: Parameters<typeof createRunDemo>[0]) {
+  return (await import("./demo")).createRunDemo(input)
 }
 
 async function resolveExitTitle(
@@ -425,7 +429,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput): Promise<void> {
 
       if (input.demo) {
         await ensureSession()
-        state.demo = createRunDemo({
+        state.demo = await createDemo({
           footer,
           sessionID: state.sessionID,
           thinking: input.thinking,
@@ -548,7 +552,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput): Promise<void> {
                   state.history = []
                   includeFiles = true
                   state.demo = input.demo
-                    ? createRunDemo({
+                    ? await createDemo({
                         footer,
                         sessionID: state.sessionID,
                         thinking: input.thinking,
