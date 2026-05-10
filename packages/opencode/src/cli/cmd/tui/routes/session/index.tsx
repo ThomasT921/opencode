@@ -29,6 +29,8 @@ import {
   RGBA,
   type MarkdownOptions,
   type MarkdownRenderable,
+  CodeRenderable,
+  TextTableRenderable,
   TextRenderable,
   StyledText,
   type TextChunk,
@@ -1566,6 +1568,58 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
     if (diffCache.size > 20) diffCache.delete(diffCache.keys().next().value!)
     return chunks
   }
+  const renderBlockquoteBar = (chunks: TextChunk[]) => {
+    let lineStart = true
+    let spaces = 0
+    let replaced = false
+    let skipWhitespace = false
+    return chunks.map((chunk) => {
+      let next = ""
+      for (const char of chunk.text) {
+        if (skipWhitespace && (char === " " || char === "\t")) {
+          skipWhitespace = false
+          continue
+        }
+        skipWhitespace = false
+        if (lineStart && !replaced && char === " " && spaces < 3) {
+          spaces++
+          next += char
+          continue
+        }
+        if (lineStart && !replaced && char === ">") {
+          next += "│ "
+          replaced = true
+          skipWhitespace = true
+          continue
+        }
+        next += char
+        if (char === "\n") {
+          lineStart = true
+          spaces = 0
+          replaced = false
+          skipWhitespace = false
+          continue
+        }
+        lineStart = false
+      }
+      return next === chunk.text ? chunk : { ...chunk, text: next }
+    })
+  }
+  const trimCodeIndent = (value: string) => {
+    const lines = value.split("\n")
+    const indents = lines.filter((line) => line.trim()).map((line) => line.match(/^[ \t]*/)?.[0].length ?? 0)
+    const indent = Math.min(...indents)
+    if (!Number.isFinite(indent) || indent === 0) return value
+    return lines.map((line) => (line.trim() ? line.slice(indent) : line)).join("\n")
+  }
+  const padTableCells = (renderable: TextTableRenderable) => {
+    renderable.content = renderable.content.map((row) =>
+      row.map((cell) => {
+        const content = cell ?? []
+        return [{ __isChunk: true, text: " " }, ...content, { __isChunk: true, text: " " }] satisfies TextChunk[]
+      }),
+    )
+  }
   const configureMarkdown = (node: MarkdownRenderable | undefined) => {
     if (!node) return
     const renderNode: NonNullable<MarkdownOptions["renderNode"]> = (token, context) => {
@@ -1583,8 +1637,16 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
       }
 
       if (token.type === "blockquote") {
-        token.raw = token.raw.replace(/^([ \t]{0,3})>[ \t]?/gm, "$1│ ")
         const renderable = context.defaultRender()
+        if (renderable instanceof CodeRenderable) {
+          const code = renderable
+          const onChunks = code.onChunks
+          code.onChunks = (chunks, context) => {
+            const result = onChunks?.call(code, chunks, context)
+            if (result instanceof Promise) return result.then((next) => renderBlockquoteBar(next ?? chunks))
+            return renderBlockquoteBar(result ?? chunks)
+          }
+        }
         if (!firstBlock && renderable) {
           renderable.marginTop = typeof renderable.marginTop === "number" ? Math.max(renderable.marginTop, 1) : 1
         }
@@ -1592,6 +1654,16 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
       }
 
       const needsCodeTopGap = token.type === "code" && !firstBlock
+      if (token.type === "code" && /^[ \t]{4,}(```|~~~)/.test(token.raw)) {
+        token.text = trimCodeIndent(token.text)
+      }
+
+      if (token.type === "table") {
+        const renderable = context.defaultRender()
+        if (renderable instanceof TextTableRenderable) padTableCells(renderable)
+        return renderable
+      }
+
       if (token.type === "code" && token.lang?.trim().toLowerCase() === "diff") {
         const renderable = new TextRenderable(node.ctx, {
           content: new StyledText(colorDiffChunks(token.text)),
