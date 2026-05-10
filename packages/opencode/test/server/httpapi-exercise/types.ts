@@ -1,9 +1,19 @@
 import type { Duration, Effect } from "effect"
+import type { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import type { Config } from "../../../src/config/config"
 import type { Project } from "../../../src/project/project"
 import type { Worktree } from "../../../src/worktree"
 import type { MessageV2 } from "../../../src/session/message-v2"
 import type { SessionID } from "../../../src/session/schema"
+
+/**
+ * The real generated SDK client used by every consumer (TUI, Desktop, plugins).
+ * Scenarios that opt into `.viaSdk(...)` get one of these wired to the in-process
+ * exerciser router so SDK request transforms (auto-injected `?directory=...`,
+ * header rewrites, etc.) are exercised against real handlers — that's what
+ * catches the #26569 family.
+ */
+export type Sdk = ReturnType<typeof createOpencodeClient>
 
 export const OpenApiMethods = ["get", "post", "put", "delete", "patch"] as const
 export const Methods = ["GET", "POST", "PUT", "DELETE", "PATCH"] as const
@@ -88,6 +98,7 @@ export type ActiveScenario = {
   mutates: boolean
   reset: boolean
   auth: AuthPolicy
+  sdkCall?: (sdk: Sdk, ctx: SeededContext<unknown>) => Promise<unknown>
 }
 
 export type BuilderState<S> = {
@@ -102,6 +113,7 @@ export type BuilderState<S> = {
   mutates: boolean
   reset: boolean
   auth: AuthPolicy
+  sdkCall?: (sdk: Sdk, ctx: SeededContext<S>) => Promise<unknown>
 }
 
 export type TodoScenario = {

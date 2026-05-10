@@ -1,5 +1,6 @@
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { parse } from "./assertions"
 import { runtime, type Runtime } from "./runtime"
 import type { ActiveScenario, Backend, BackendApp, CallResult, CaptureMode, SeededContext } from "./types"
@@ -17,9 +18,47 @@ export function call(
   ctx: SeededContext<unknown>,
   options: CallOptions = {},
 ) {
-  return Effect.promise(async () =>
-    capture(await app(await runtime(), backend, options).request(toRequest(scenario, ctx)), scenario.capture),
-  )
+  return Effect.promise(async () => {
+    const handler = app(await runtime(), backend, options)
+    if (scenario.sdkCall) return callViaSdk(handler, scenario, ctx)
+    return capture(await handler.request(toRequest(scenario, ctx)), scenario.capture)
+  })
+}
+
+/**
+ * Run the scenario through a real `createOpencodeClient` wired to the
+ * in-process exerciser router. The SDK applies its real request transforms
+ * (auto-injected `?directory=...` / `?workspace=...` on GETs, header
+ * rewrites, etc.), so any drift between what the SDK sends and what the
+ * server's typed query schemas accept fails the scenario at write time.
+ */
+async function callViaSdk(handler: BackendApp, scenario: ActiveScenario, ctx: SeededContext<unknown>) {
+  const sdk = createOpencodeClient({
+    baseUrl: "http://localhost",
+    directory: ctx.directory,
+    fetch: ((input: Request | URL | string, init?: RequestInit) => handler.request(input, init)) as unknown as typeof fetch,
+  })
+  let result: unknown
+  let thrown: unknown
+  try {
+    result = await scenario.sdkCall!(sdk, ctx)
+  } catch (err) {
+    thrown = err
+  }
+  return normalizeSdkResult(result, thrown)
+}
+
+function normalizeSdkResult(result: unknown, thrown: unknown): CallResult {
+  // SDK returns either { data, error, response } when not throwing, or
+  // throws an Error with `.cause = { body, status }` when throwOnError: true.
+  const tuple = result as { data?: unknown; error?: unknown; response?: Response } | undefined
+  const cause = (thrown as { cause?: { status?: number; body?: unknown } } | undefined)?.cause
+  const response = tuple?.response
+  const status = response?.status ?? cause?.status ?? (thrown ? 0 : 200)
+  const contentType = response?.headers.get("content-type") ?? "application/json"
+  const body = tuple?.data ?? tuple?.error ?? cause?.body ?? thrown
+  const text = typeof body === "string" ? body : JSON.stringify(body ?? null)
+  return { status, contentType, body, text, timedOut: false }
 }
 
 export function callAuthProbe(

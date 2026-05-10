@@ -123,6 +123,19 @@ const scenarios: Scenario[] = [
   http.protected.get("/command", "command.list").json(200, array, "status"),
   http.protected.get("/agent", "app.agents").json(200, array, "status"),
   http.protected.get("/skill", "app.skills").json(200, array, "status"),
+  // Same /agent route exercised through the real SDK client. Catches the
+  // SDK-injection class of regressions (`?directory=...` auto-added on GETs)
+  // that the direct-Request path is structurally blind to. See #26569.
+  http.protected
+    .get("/agent", "app.agents.via_sdk")
+    .viaSdk((sdk) => sdk.app.agents({}, { throwOnError: true }))
+    .json(200, array, "status"),
+  // Same /command route via SDK — second proof that the directory injection
+  // works for any GET under workspace routing.
+  http.protected
+    .get("/command", "command.list.via_sdk")
+    .viaSdk((sdk) => sdk.command.list({}, { throwOnError: true }))
+    .json(200, array, "status"),
   http.protected.get("/lsp", "lsp.status").json(200, array),
   http.protected.get("/formatter", "formatter.status").json(200, array),
   http.protected.get("/config", "config.get").json(200, undefined, "status"),

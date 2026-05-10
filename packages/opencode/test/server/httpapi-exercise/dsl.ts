@@ -10,6 +10,7 @@ import type {
   ProjectOptions,
   RequestSpec,
   ScenarioContext,
+  Sdk,
   SeededContext,
   TodoScenario,
 } from "./types"
@@ -48,6 +49,22 @@ class ScenarioBuilder<S = undefined> {
 
   at(request: BuilderState<S>["request"]) {
     return this.clone({ request })
+  }
+
+  /**
+   * Run the scenario through the real SDK client wired to the in-process
+   * exerciser router. The SDK applies its real request transforms (for example,
+   * auto-injecting `?directory=...` on GETs when a directory is set) so route
+   * tests catch the SDK-vs-server-shape drift class at write time instead of
+   * regression time. Existing `.at(...)` scenarios are unchanged.
+   *
+   * The callback may return either an SDK result tuple (`{ data, error,
+   * response }`) or throw (use `{ throwOnError: true }`); the runner
+   * normalizes both into the same `CallResult` shape that `.json()` /
+   * `.status()` / `.ok()` already understand.
+   */
+  viaSdk(sdkCall: (sdk: Sdk, ctx: SeededContext<S>) => Promise<unknown>) {
+    return this.clone({ sdkCall })
   }
 
   probe(authProbe: RequestSpec) {
@@ -167,6 +184,8 @@ class ScenarioBuilder<S = undefined> {
       mutates: state.mutates,
       reset: state.reset,
       auth: state.auth,
+      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- `.seeded(...)` preserves the paired sdkCall/state type inside the builder.
+      sdkCall: state.sdkCall as ActiveScenario["sdkCall"],
     }
   }
 }
