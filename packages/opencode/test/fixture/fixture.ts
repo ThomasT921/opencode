@@ -193,8 +193,11 @@ export const withTmpdirInstance =
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       const directory = yield* tmpdirScoped(options)
-      return yield* InstanceStore.Service.use((store) =>
-        store.provide({ directory }, self.pipe(Effect.provideService(TestInstance, { directory }))),
+      const store = yield* InstanceStore.Service
+      return yield* Effect.acquireUseRelease(
+        store.load({ directory }),
+        (ctx) => self.pipe(Effect.provideService(TestInstance, { directory }), Effect.provideService(InstanceRef, ctx)),
+        (ctx) => store.dispose(ctx).pipe(Effect.ignore),
       )
     }).pipe(
       Effect.provide(InstanceStore.defaultLayer.pipe(Layer.provide(noopBootstrap))),
