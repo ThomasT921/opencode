@@ -256,9 +256,15 @@ export const LLMEvent = Object.assign(llmEventTagged, {
   toolResult: (input: WithID<ToolResult, ToolCallID>) => ToolResult.make({ ...input, id: toolCallID(input.id) }),
   toolError: (input: WithID<ToolError, ToolCallID>) => ToolError.make({ ...input, id: toolCallID(input.id) }),
   stepFinish: (input: WithUsage<StepFinish>) =>
-    StepFinish.make({ ...input, usage: input.usage instanceof Usage ? input.usage : new Usage(input.usage ?? {}) }),
+    StepFinish.make({
+      ...input,
+      usage: input.usage === undefined ? undefined : input.usage instanceof Usage ? input.usage : new Usage(input.usage),
+    }),
   requestFinish: (input: WithUsage<RequestFinish>) =>
-    RequestFinish.make({ ...input, usage: input.usage instanceof Usage ? input.usage : new Usage(input.usage ?? {}) }),
+    RequestFinish.make({
+      ...input,
+      usage: input.usage === undefined ? undefined : input.usage instanceof Usage ? input.usage : new Usage(input.usage),
+    }),
   providerError: ProviderErrorEvent.make,
   is: {
     requestStart: llmEventTagged.guards["request-start"],
