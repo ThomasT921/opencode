@@ -11,6 +11,8 @@ type ToolInput = {
 
 export type RequestInput = {
   readonly model: Provider.Model
+  readonly apiKey?: string
+  readonly baseURL?: string
   readonly system?: readonly string[]
   readonly messages: readonly ModelMessage[]
   readonly tools?: Record<string, ToolInput>
@@ -154,14 +156,16 @@ const baseURL = (model: Provider.Model) => {
   throw new Error(`Native LLM request adapter requires a base URL for ${model.providerID}/${model.id}`)
 }
 
-export const model = (model: Provider.Model, headers?: Record<string, string>) => {
+export const model = (input: Provider.Model | RequestInput, headers?: Record<string, string>) => {
+  const model = "model" in input ? input.model : input
   const route = ROUTE[model.api.npm]
   if (!route) throw new Error(`Native LLM request adapter does not support provider package ${model.api.npm}`)
   return LLM.model({
     id: model.api.id,
     provider: model.providerID,
     route,
-    baseURL: baseURL(model),
+    baseURL: "model" in input && input.baseURL ? input.baseURL : baseURL(model),
+    apiKey: "model" in input ? input.apiKey : undefined,
     headers: Object.keys({ ...model.headers, ...headers }).length === 0 ? undefined : { ...model.headers, ...headers },
     limits: {
       context: model.limit.context,
@@ -173,7 +177,7 @@ export const model = (model: Provider.Model, headers?: Record<string, string>) =
 export const request = (input: RequestInput) => {
   const converted = messages(input.messages)
   return LLM.request({
-    model: model(input.model, input.headers),
+    model: model(input, input.headers),
     system: [...(input.system ?? []).map(SystemPart.make), ...converted.system],
     messages: converted.messages,
     tools: tools(input.tools),

@@ -5,7 +5,6 @@ import { Cause, Effect, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
 import { LLM } from "../../src/session/llm"
-import { Instance } from "../../src/project/instance"
 import { WithInstance } from "../../src/project/with-instance"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -684,6 +683,121 @@ describe("session.llm.stream", () => {
 
         const maxTokens = body.max_output_tokens as number | undefined
         expect(maxTokens).toBe(undefined) // match codex cli behavior
+      },
+    })
+  })
+
+  test("streams OpenAI through native runtime when opted in", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("openai", "gpt-5.2")
+    const model = source.model
+    const chunks = [
+      {
+        type: "response.created",
+        response: {
+          id: "resp-native",
+        },
+      },
+      {
+        type: "response.output_item.added",
+        item: { type: "message", id: "item-native", status: "in_progress" },
+      },
+      {
+        type: "response.output_text.delta",
+        item_id: "item-native",
+        delta: "Hello native",
+      },
+      {
+        type: "response.completed",
+        response: {
+          incomplete_details: null,
+          usage: {
+            input_tokens: 1,
+            input_tokens_details: null,
+            output_tokens: 1,
+            output_tokens_details: null,
+          },
+        },
+      },
+    ]
+    const request = waitRequest("/responses", createEventResponse(chunks, true))
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["openai"],
+            provider: {
+              openai: {
+                name: "OpenAI",
+                env: ["OPENAI_API_KEY"],
+                npm: "@ai-sdk/openai",
+                api: "https://api.openai.com/v1",
+                models: {
+                  [model.id]: model,
+                },
+                options: {
+                  apiKey: "test-openai-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await WithInstance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const previous = process.env.OPENCODE_LLM_RUNTIME
+        process.env.OPENCODE_LLM_RUNTIME = "native"
+        try {
+          const resolved = await getModel(ProviderID.openai, ModelID.make(model.id))
+          const sessionID = SessionID.make("session-test-native")
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: {},
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+            temperature: 0.2,
+          } satisfies Agent.Info
+
+          await drain({
+            user: {
+              id: MessageID.make("msg_user-native"),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: agent.name,
+              model: { providerID: ProviderID.make("openai"), modelID: resolved.id, variant: "high" },
+            } satisfies MessageV2.User,
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            messages: [{ role: "user", content: "Hello" }],
+            tools: {},
+          })
+        } finally {
+          if (previous === undefined) delete process.env.OPENCODE_LLM_RUNTIME
+          else process.env.OPENCODE_LLM_RUNTIME = previous
+        }
+
+        const capture = await request
+        expect(capture.url.pathname.endsWith("/responses")).toBe(true)
+        expect(capture.headers.get("Authorization")).toBe("Bearer test-openai-key")
+        expect(capture.body.model).toBe(model.id)
+        expect(capture.body.stream).toBe(true)
+        expect((capture.body.reasoning as { effort?: string } | undefined)?.effort).toBe("high")
+        expect(JSON.stringify(capture.body.input)).toContain("You are a helpful assistant.")
+        expect(capture.body.input).toContainEqual({ role: "user", content: [{ type: "input_text", text: "Hello" }] })
       },
     })
   })
