@@ -34,7 +34,7 @@ const ProjectIcon = Schema.Struct({
 
 const ProjectCommands = Schema.Struct({
   start: optionalOmitUndefined(
-    Schema.String.annotate({ description: "Startup script to run when creating a new workspace (worktree)" }),
+    Schema.String.annotate({ description: "Startup script to run when creating a new worktree" }),
   ),
 })
 
