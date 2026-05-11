@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { LLMClient, RequestExecutor } from "@opencode-ai/llm/route"
 import { jsonSchema, tool, type ModelMessage } from "ai"
+import { Effect } from "effect"
 import { LLMNative } from "@/session/llm-native"
 import type { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
@@ -230,5 +232,31 @@ describe("session.llm-native.request", () => {
         messages: [],
       }),
     ).toThrow("Native LLM request adapter does not support provider package unknown-provider")
+  })
+
+  test("compiles through the native OpenAI Responses route", async () => {
+    const prepared = await Effect.runPromise(
+      LLMClient.prepare(
+        LLMNative.request({
+          model: baseModel,
+          messages: [{ role: "user", content: "hello" }],
+          providerOptions: { openai: { store: false } },
+          maxOutputTokens: 512,
+          headers: { "x-request": "request-header" },
+        }),
+      ).pipe(Effect.provide(LLMClient.layer), Effect.provide(RequestExecutor.defaultLayer)),
+    )
+
+    expect(prepared).toMatchObject({
+      route: "openai-responses",
+      protocol: "openai-responses",
+      body: {
+        model: "gpt-5-mini",
+        input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }],
+        max_output_tokens: 512,
+        store: false,
+        stream: true,
+      },
+    })
   })
 })
