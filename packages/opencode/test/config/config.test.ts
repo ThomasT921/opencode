@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Config } from "@/config/config"
 import { ConfigManaged } from "@/config/managed"
+import { ConfigPaths } from "@/config/paths"
 import { ConfigParse } from "../../src/config/parse"
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 
@@ -57,6 +58,7 @@ const layer = Config.layer.pipe(
   Layer.provide(emptyAccount),
   Layer.provideMerge(infra),
   Layer.provide(noopNpm),
+  Layer.provide(ConfigPaths.defaultLayer),
 )
 
 const it = testEffect(layer)
@@ -548,6 +550,7 @@ test("resolves env templates in account config with account token", async () => 
     Layer.provide(fakeAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
+    Layer.provide(ConfigPaths.defaultLayer),
   )
 
   try {
@@ -1059,6 +1062,7 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
     Layer.provide(emptyAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
+    Layer.provide(ConfigPaths.defaultLayer),
   )
 
   try {
@@ -1944,6 +1948,7 @@ test("project config overrides remote well-known config", async () => {
     Layer.provide(emptyAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
+    Layer.provide(ConfigPaths.defaultLayer),
   )
 
   try {
@@ -2002,6 +2007,7 @@ test("wellknown URL with trailing slash is normalized", async () => {
     Layer.provide(emptyAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
+    Layer.provide(ConfigPaths.defaultLayer),
   )
 
   try {
@@ -2074,6 +2080,7 @@ test("wellknown remote_config supports templated env vars in headers", async () 
     Layer.provide(emptyAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
+    Layer.provide(ConfigPaths.defaultLayer),
   )
 
   try {
