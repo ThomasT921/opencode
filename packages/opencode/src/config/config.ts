@@ -45,21 +45,16 @@ import { Npm } from "@opencode-ai/core/npm"
 
 const log = Log.create({ service: "config" })
 
-// Custom merge function that concatenates array fields instead of replacing them
-// Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
-function mergeConfig(target: Info, source: Info): Info {
-  return mergeDeep(target, source) as Info
-}
-
-function mergeConfigConcatArrays(target: Info, source: Info): Info {
-  const merged = mergeConfig(target, source)
+// Custom merge: deep-merges most fields, but dedupes `instructions` and
+// concatenates `permission` as layered configs so user-written rule ordering
+// is preserved across config sources.
+// Keep remeda's deep conditional merge type out of hot config-loading paths;
+// TS profiling showed it dominates here.
+function mergeConfigs(target: Info, source: Info): Info {
+  const merged = mergeDeep(target, source) as Info
   if (target.instructions && source.instructions) {
     merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
   }
-  // Accumulate permission layers for later merging as rulesets.
-  // This preserves the ordering semantics: later rules override earlier rules.
-  // Each layer keeps the raw shape the user wrote on disk; consumers should use
-  // ConfigPermission.toLayers to normalise.
   if (source.permission) {
     merged.permission = [...ConfigPermission.toLayers(target.permission), ...ConfigPermission.toLayers(source.permission)]
   }
@@ -236,9 +231,7 @@ export const Info = Schema.Struct({
     description: "Additional instruction files or patterns to include",
   }),
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
-  permission: Schema.optional(
-    Schema.Union([ConfigPermission.Info, Schema.mutable(Schema.Array(ConfigPermission.Info))]),
-  ).annotate({
+  permission: Schema.optional(ConfigPermission.LayersInput).annotate({
     description:
       "Permission configuration. Accepts a single object (per-tool action map) or an array of layered configs; arrays are merged in order so later layers override earlier ones.",
   }),
@@ -431,9 +424,9 @@ export const layer = Layer.effect(
             .pipe(Effect.catch(() => Effect.void))
         }
       }
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "config.json")))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.json")))
-      result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc")))
+      result = mergeConfigs(result, yield* loadFile(path.join(Global.Path.config, "config.json")))
+      result = mergeConfigs(result, yield* loadFile(path.join(Global.Path.config, "opencode.json")))
+      result = mergeConfigs(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc")))
 
       const legacy = path.join(Global.Path.config, "config")
       if (existsSync(legacy)) {
@@ -443,7 +436,7 @@ export const layer = Layer.effect(
               const { provider, model, ...rest } = mod.default
               if (provider && model) result.model = `${provider}/${model}`
               result["$schema"] = "https://opencode.ai/config.json"
-              result = mergeConfig(result, rest)
+              result = mergeConfigs(result, rest)
               await fsNode.writeFile(path.join(Global.Path.config, "config.json"), JSON.stringify(result, null, 2))
               await fsNode.unlink(legacy)
             })
@@ -523,7 +516,7 @@ export const layer = Layer.effect(
         })
 
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
-          result = mergeConfigConcatArrays(result, next)
+          result = mergeConfigs(result, next)
           return mergePluginOrigins(source, next.plugin, kind)
         }
 
@@ -557,7 +550,7 @@ export const layer = Layer.effect(
                   return isRecord(data) && isRecord(data.config) ? data.config : data
                 })) as Record<string, unknown>)
               : {}
-            const remoteConfig = mergeConfig(wellknown.config ?? {}, fetchedConfig as Info)
+            const remoteConfig = mergeConfigs(wellknown.config ?? {}, fetchedConfig as Info)
             if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
             const source = `${url}/.well-known/opencode`
             const next = yield* loadConfig(JSON.stringify(remoteConfig), {
@@ -701,7 +694,7 @@ export const layer = Layer.effect(
         // macOS managed preferences (.mobileconfig deployed via MDM) override everything
         const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
         if (managed) {
-          result = mergeConfigConcatArrays(
+          result = mergeConfigs(
             result,
             yield* loadConfig(managed.text, {
               dir: path.dirname(managed.source),
@@ -720,8 +713,12 @@ export const layer = Layer.effect(
         }
 
         if (Flag.OPENCODE_PERMISSION) {
-          const envPermission = JSON.parse(Flag.OPENCODE_PERMISSION) as ConfigPermission.Info
-          result.permission = [...ConfigPermission.toLayers(result.permission), envPermission]
+          const envPermission = ConfigParse.schema(
+            ConfigPermission.LayersInput,
+            JSON.parse(Flag.OPENCODE_PERMISSION),
+            "OPENCODE_PERMISSION",
+          )
+          result.permission = [...ConfigPermission.toLayers(result.permission), ...ConfigPermission.toLayers(envPermission)]
         }
 
         if (result.tools) {

@@ -59,9 +59,15 @@ type _Info = Schema.Schema.Type<typeof InputObject>
 export type Info = { -readonly [K in keyof _Info]: _Info[K] }
 
 // Top-level config accepts either a single permission object or an array of
-// layered configs. Internal merging produces arrays; this helper normalises
-// either shape into the array form expected by consumers.
-export function toLayers(value: Info | Info[] | undefined): Info[] {
+// layered configs. Validated input goes through this union; runtime merging
+// always produces arrays.
+export const LayersInput = Schema.Union([Info, Schema.mutable(Schema.Array(Info))]).annotate({
+  identifier: "PermissionLayersInput",
+})
+export type LayersInput = Schema.Schema.Type<typeof LayersInput>
+
+// Normalise either shape into the array form expected by consumers.
+export function toLayers(value: LayersInput | undefined): Info[] {
   if (!value) return []
   return Array.isArray(value) ? value : [value]
 }

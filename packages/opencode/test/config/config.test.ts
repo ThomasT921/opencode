@@ -1891,6 +1891,68 @@ test("user bash catchall overrides inherited bash rules", async () => {
   })
 })
 
+// Permissions split across multiple global config files (config.json + opencode.json)
+// must layer in load order rather than deep-merging into a single object.
+test("multiple global config files preserve permission layer ordering", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear(true)
+
+  try {
+    // First global file: deny rm-style commands.
+    await writeConfig(globalTmp.path, {
+      $schema: "https://opencode.ai/config.json",
+      permission: { bash: { "rm *": "deny" } },
+    }, "config.json")
+    // Second global file: top-level catchall "ask" — must come *after* the deny layer.
+    await writeConfig(globalTmp.path, {
+      $schema: "https://opencode.ai/config.json",
+      permission: { "*": "ask" },
+    }, "opencode.json")
+
+    await WithInstance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await load()
+        const layers = ConfigPermission.toLayers(config.permission)
+        // Each global file contributes its own layer.
+        expect(layers.length).toBeGreaterThanOrEqual(2)
+        const ruleset = Permission.merge(...layers.map((p) => Permission.fromConfig(p)))
+        // Later "*": "ask" overrides earlier "rm *": "deny" — ordering is preserved.
+        expect(Permission.evaluate("bash", "rm -rf /", ruleset).action).toBe("ask")
+      },
+    })
+  } finally {
+    ;(Global.Path as { config: string }).config = prev
+    await clear(true)
+  }
+})
+
+test("OPENCODE_PERMISSION env var rejects malformed input", () => {
+  // Validates the env-var parser surfaces clear errors instead of silently casting.
+  expect(() =>
+    ConfigParse.schema(
+      ConfigPermission.LayersInput,
+      { bash: "maybe" },
+      "OPENCODE_PERMISSION",
+    ),
+  ).toThrow()
+})
+
+test("OPENCODE_PERMISSION env var accepts both single-object and array syntax", () => {
+  const single = ConfigParse.schema(ConfigPermission.LayersInput, { bash: "deny" }, "OPENCODE_PERMISSION")
+  expect(ConfigPermission.toLayers(single)).toHaveLength(1)
+
+  const layered = ConfigParse.schema(
+    ConfigPermission.LayersInput,
+    [{ bash: "deny" }, { bash: { "echo *": "allow" } }],
+    "OPENCODE_PERMISSION",
+  )
+  expect(ConfigPermission.toLayers(layered)).toHaveLength(2)
+})
+
 test("config parser preserves permission order while rejecting unknown top-level keys", () => {
   const config = ConfigParse.schema(
     Config.Info,
