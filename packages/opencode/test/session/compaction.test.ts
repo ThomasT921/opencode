@@ -282,7 +282,7 @@ function createSummaryCompaction(sessionID: SessionID) {
 function readCompactionPart(sessionID: SessionID) {
   return SessionNs.Service.use((ssn) => ssn.messages({ sessionID })).pipe(
     Effect.map((messages) =>
-      messages.at(-2)?.parts.find((item): item is MessageV2.CompactionPart => item.type === "compaction"),
+      messages.flatMap((message) => message.parts).find((item): item is MessageV2.CompactionPart => item.type === "compaction"),
     ),
   )
 }
@@ -1005,7 +1005,7 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
-    "serializes retained tail media as text in the summary input",
+    "serializes retained tail media as text in the saved summary",
     () => {
       const stub = llm()
       let captured = ""
@@ -1034,8 +1034,13 @@ describe("session.compaction.process", () => {
         const part = yield* readCompactionPart(session.id)
         expect(part?.type).toBe("compaction")
         expect(part?.tail_start_id).toBeUndefined()
-        expect(captured).toContain("recent image turn")
-        expect(captured).toContain("Attached image/png: big.png")
+        expect(captured).not.toContain("recent image turn")
+        expect(captured).not.toContain("Attached image/png: big.png")
+        const tail = (yield* ssn.messages({ sessionID: session.id })).find(
+          (item) => item.info.role === "user" && item.parts.some((part) => part.type === "text" && part.synthetic),
+        )
+        expect(JSON.stringify(tail?.parts)).toContain("recent image turn")
+        expect(JSON.stringify(tail?.parts)).toContain("Attached image/png: big.png")
       }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
     },
     { git: true },
@@ -1080,12 +1085,17 @@ describe("session.compaction.process", () => {
         expect(part?.type).toBe("compaction")
         expect(part?.tail_start_id).toBeUndefined()
         expect(captured).toContain("zzzz")
-        expect(captured).toContain("keep tail")
+        expect(captured).not.toContain("keep tail")
+        const tail = (yield* ssn.messages({ sessionID: session.id })).find(
+          (item) => item.info.role === "user" && item.parts.some((part) => part.type === "text" && part.synthetic),
+        )
+        expect(JSON.stringify(tail?.parts)).toContain("keep tail")
 
         const filtered = MessageV2.filterCompacted(MessageV2.stream(session.id))
-        expect(filtered.map((msg) => msg.info.id)).toEqual([parent!, expect.any(String)])
+        expect(filtered.map((msg) => msg.info.id)).toEqual([parent!, expect.any(String), expect.any(String)])
         expect(filtered[1]?.info.role).toBe("assistant")
         expect(filtered[1]?.info.role === "assistant" ? filtered[1].info.summary : false).toBe(true)
+        expect(filtered[2]?.info.role).toBe("user")
         expect(filtered.map((msg) => msg.info.id)).not.toContain(large.id)
         expect(filtered.map((msg) => msg.info.id)).not.toContain(keep.id)
       }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
@@ -1112,7 +1122,9 @@ describe("session.compaction.process", () => {
       const last = all.at(-1)
 
       expect(result).toBe("continue")
-      expect(last?.info.role).toBe("assistant")
+      expect(last?.info.role).toBe("user")
+      expect(last?.parts.some((part) => part.type === "text" && part.text.includes("recent-conversation-tail"))).toBe(true)
+      expect(all.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(true)
       expect(
         all.some(
           (msg) =>
@@ -1354,7 +1366,7 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
-    "summarizes the head while serializing recent tail into summary input",
+    "summarizes the head while appending serialized recent tail to saved summary",
     () => {
       const stub = llm()
       let captured: LLM.StreamInput["messages"] = []
@@ -1386,10 +1398,16 @@ describe("session.compaction.process", () => {
         expect(head).toContain("older context")
         expect(head).not.toContain("keep this turn")
         expect(head).not.toContain("and this one too")
-        expect(prompt).toContain("keep this turn")
-        expect(prompt).toContain("and this one too")
-        expect(prompt).toContain("recent-conversation-tail")
+        expect(prompt).not.toContain("keep this turn")
+        expect(prompt).not.toContain("and this one too")
+        expect(prompt).not.toContain("recent-conversation-tail")
         expect(prompt).not.toContain("What did we do so far?")
+        const tail = (yield* ssn.messages({ sessionID: session.id })).find(
+          (item) => item.info.role === "user" && item.parts.some((part) => part.type === "text" && part.synthetic),
+        )
+        expect(JSON.stringify(tail?.parts)).toContain("keep this turn")
+        expect(JSON.stringify(tail?.parts)).toContain("and this one too")
+        expect(JSON.stringify(tail?.parts)).toContain("recent-conversation-tail")
       }).pipe(withCompaction({ llm: stub.layer }))
     },
     { git: true },

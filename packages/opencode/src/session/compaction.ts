@@ -119,39 +119,58 @@ function completedCompactions(messages: MessageV2.WithParts[]) {
   })
 }
 
-function buildPrompt(input: { previousSummary?: string; context: string[]; tail?: string }) {
-  const source = input.tail
-    ? "the conversation history above and the serialized recent conversation tail below"
-    : "the conversation history above"
+function buildPrompt(input: { previousSummary?: string; context: string[] }) {
   const anchor = input.previousSummary
     ? [
-        `Update the anchored summary below using ${source}.`,
+        "Update the anchored summary below using the conversation history above.",
         "Preserve still-true details, remove stale details, and merge in the new facts.",
         "<previous-summary>",
         input.previousSummary,
         "</previous-summary>",
       ].join("\n")
-    : `Create a new anchored summary from ${source}.`
-  const tail = input.tail
-    ? [
-        "Fold this serialized recent conversation tail into the summary; it is not provider message history.",
-        "<recent-conversation-tail>",
-        input.tail,
-        "</recent-conversation-tail>",
-      ].join("\n")
-    : undefined
-  return [anchor, ...(tail ? [tail] : []), SUMMARY_TEMPLATE, ...input.context].join("\n\n")
+    : "Create a new anchored summary from the conversation history above."
+  return [anchor, SUMMARY_TEMPLATE, ...input.context].join("\n\n")
 }
 
 const serialize = Effect.fn("SessionCompaction.serialize")(function* (input: {
   messages: MessageV2.WithParts[]
-  model: Provider.Model
 }) {
-  const messages = yield* MessageV2.toModelMessagesEffect(input.messages, input.model, {
-    stripMedia: true,
-    toolOutputMaxChars: TOOL_OUTPUT_MAX_CHARS,
+  const parts = input.messages.flatMap((msg) => {
+    if (msg.info.role === "user") {
+      const content = msg.parts
+        .flatMap((part) => {
+          if (part.type === "text" && !part.ignored && part.text !== "") return [part.text]
+          if (part.type === "file" && MessageV2.isMedia(part.mime)) return [`[Attached ${part.mime}: ${part.filename ?? "file"}]`]
+          return []
+        })
+        .join("\n")
+      return content ? [`[User]: ${content}`] : []
+    }
+    if (msg.info.role === "assistant") {
+      return msg.parts.flatMap((part) => {
+        if (part.type === "reasoning") return part.text ? [`[Assistant thinking]: ${part.text}`] : []
+        if (part.type === "text") return part.text ? [`[Assistant]: ${part.text}`] : []
+        if (part.type !== "tool") return []
+        const input = Object.entries(part.state.input)
+          .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+          .join(", ")
+        if (part.state.status === "completed") {
+          const output = part.state.time.compacted
+            ? "[Old tool result content cleared]"
+            : part.state.output.length <= TOOL_OUTPUT_MAX_CHARS
+              ? part.state.output
+              : `${part.state.output.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[Tool output truncated for compaction: omitted ${part.state.output.length - TOOL_OUTPUT_MAX_CHARS} chars]`
+          return [`[Assistant tool call]: ${part.tool}(${input})`, `[Tool result]: ${output}`]
+        }
+        if (part.state.status === "error") {
+          return [`[Assistant tool call]: ${part.tool}(${input})`, `[Tool error]: ${part.state.error}`]
+        }
+        return [`[Assistant tool call]: ${part.tool}(${input})`]
+      })
+    }
+    return []
   })
-  return messages.length ? JSON.stringify(messages, null, 2) : undefined
+  return parts.length ? parts.join("\n\n") : undefined
 })
 
 function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
@@ -262,7 +281,7 @@ export const layer: Layer.Layer<
       messages: MessageV2.WithParts[]
       model: Provider.Model
     }) {
-      return Token.estimate((yield* serialize(input)) ?? "")
+      return Token.estimate((yield* serialize({ messages: input.messages })) ?? "")
     })
 
     const select = Effect.fn("SessionCompaction.select")(function* (input: {
@@ -425,8 +444,8 @@ export const layer: Layer.Layer<
       )
       const tailMessages = structuredClone(selected.tail)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: tailMessages })
-      const tail = yield* serialize({ messages: tailMessages, model })
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context, tail })
+      const tail = yield* serialize({ messages: tailMessages })
+      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
@@ -491,6 +510,29 @@ export const layer: Layer.Layer<
         processor.message.finish = "error"
         yield* session.updateMessage(processor.message)
         return "stop"
+      }
+
+      if (tail) {
+        const tailMessage = yield* session.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: input.sessionID,
+          time: { created: Date.now() },
+          agent: userMessage.agent,
+          model: userMessage.model,
+          format: userMessage.format,
+          tools: userMessage.tools,
+          system: userMessage.system,
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: tailMessage.id,
+          sessionID: input.sessionID,
+          type: "text",
+          metadata: { compaction_tail: true },
+          synthetic: true,
+          text: ["<recent-conversation-tail>", tail, "</recent-conversation-tail>"].join("\n\n"),
+        })
       }
 
       if (result === "continue" && input.auto) {
@@ -577,17 +619,18 @@ export const layer: Layer.Layer<
 
       if (processor.message.error) return "stop"
       if (result === "continue") {
-        const summary = summaryText(
-          (yield* session.messages({ sessionID: input.sessionID })).find((item) => item.info.id === msg.id) ?? {
-            info: msg,
-            parts: [],
-          },
-        )
+        const summaryMessage = (yield* session.messages({ sessionID: input.sessionID })).find(
+          (item) => item.info.id === msg.id,
+        ) ?? {
+          info: msg,
+          parts: [],
+        }
+        const summary = summaryText(summaryMessage) ?? ""
         if (Flag.OPENCODE_EXPERIMENTAL_EVENT_SYSTEM) {
           yield* sync.run(SessionEvent.Compaction.Ended.Sync, {
             sessionID: input.sessionID,
             timestamp: DateTime.makeUnsafe(Date.now()),
-            text: summary ?? "",
+            text: summary,
           })
         }
         yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })

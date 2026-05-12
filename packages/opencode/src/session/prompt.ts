@@ -1608,7 +1608,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
           for (let i = msgs.length - 1; i >= 0; i--) {
             const msg = msgs[i]
-            if (!lastUser && msg.info.role === "user") lastUser = msg.info
+            if (
+              !lastUser &&
+              msg.info.role === "user" &&
+              !msg.parts.some((part) => part.type === "text" && part.metadata?.compaction_tail === true)
+            )
+              lastUser = msg.info
             if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
             if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
             if (lastUser && lastFinished) break
