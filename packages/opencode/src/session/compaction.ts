@@ -186,6 +186,7 @@ function turns(messages: MessageV2.WithParts[]) {
     const msg = messages[i]
     if (msg.info.role !== "user") continue
     if (msg.parts.some((part) => part.type === "compaction")) continue
+    if (msg.parts.some((part) => part.type === "text" && part.metadata?.compaction_tail === true)) continue
     result.push({
       start: i,
       end: messages.length,

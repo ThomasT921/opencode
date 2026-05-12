@@ -1497,6 +1497,44 @@ describe("session.compaction.process", () => {
     }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 2, preserve_recent_tokens: 10_000 }) }))
   })
 
+  itCompaction.instance("summarizes previous synthetic tail on repeated compaction", () => {
+    const stub = llm()
+    let captured = ""
+    stub.push(reply("summary one"))
+    stub.push(reply("summary two", (input) => (captured = JSON.stringify(input.messages))))
+
+    return Effect.gen(function* () {
+      const ssn = yield* SessionNs.Service
+      const session = yield* ssn.create({})
+      yield* createUserMessage(session.id, "older")
+      yield* createUserMessage(session.id, "previous tail")
+      yield* createCompactionMarker(session.id)
+
+      let msgs = yield* ssn.messages({ sessionID: session.id })
+      let parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+      yield* createUserMessage(session.id, "new tail")
+      yield* createCompactionMarker(session.id)
+
+      msgs = MessageV2.filterCompacted(MessageV2.stream(session.id))
+      parent = msgs.at(-1)?.info.id
+      expect(parent).toBeTruthy()
+      yield* SessionCompaction.use.process({ parentID: parent!, messages: msgs, sessionID: session.id, auto: false })
+
+      const tails = (yield* ssn.messages({ sessionID: session.id })).filter(
+        (item) => item.info.role === "user" && item.parts.some((part) => part.type === "text" && part.metadata?.compaction_tail === true),
+      )
+      const latestTail = tails.at(-1)
+
+      expect(captured).toContain("previous tail")
+      expect(captured).toContain("latest-messages")
+      expect(JSON.stringify(latestTail?.parts)).toContain("new tail")
+      expect(JSON.stringify(latestTail?.parts)).not.toContain("previous tail")
+    }).pipe(withCompaction({ llm: stub.layer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 10_000 }) }))
+  })
+
   itCompaction.instance(
     "ignores previous summaries when sizing the serialized tail",
     Effect.gen(function* () {
