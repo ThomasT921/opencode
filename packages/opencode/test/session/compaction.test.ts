@@ -1123,7 +1123,7 @@ describe("session.compaction.process", () => {
 
       expect(result).toBe("continue")
       expect(last?.info.role).toBe("user")
-      expect(last?.parts.some((part) => part.type === "text" && part.text.includes("recent-conversation-tail"))).toBe(true)
+      expect(last?.parts.some((part) => part.type === "text" && part.text.includes("latest-messages"))).toBe(true)
       expect(all.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(true)
       expect(
         all.some(
@@ -1400,14 +1400,14 @@ describe("session.compaction.process", () => {
         expect(head).not.toContain("and this one too")
         expect(prompt).not.toContain("keep this turn")
         expect(prompt).not.toContain("and this one too")
-        expect(prompt).not.toContain("recent-conversation-tail")
+        expect(prompt).not.toContain("latest-messages")
         expect(prompt).not.toContain("What did we do so far?")
         const tail = (yield* ssn.messages({ sessionID: session.id })).find(
           (item) => item.info.role === "user" && item.parts.some((part) => part.type === "text" && part.synthetic),
         )
         expect(JSON.stringify(tail?.parts)).toContain("keep this turn")
         expect(JSON.stringify(tail?.parts)).toContain("and this one too")
-        expect(JSON.stringify(tail?.parts)).toContain("recent-conversation-tail")
+        expect(JSON.stringify(tail?.parts)).toContain("latest-messages")
       }).pipe(withCompaction({ llm: stub.layer }))
     },
     { git: true },

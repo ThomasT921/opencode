@@ -531,7 +531,13 @@ export const layer: Layer.Layer<
           type: "text",
           metadata: { compaction_tail: true },
           synthetic: true,
-          text: ["<recent-conversation-tail>", tail, "</recent-conversation-tail>"].join("\n\n"),
+          text: [
+            "The conversation history before this point was compacted into the summary above.",
+            "The following messages are the latest conversation turns after that summarized history.",
+            "<latest-messages>",
+            tail,
+            "</latest-messages>",
+          ].join("\n\n"),
         })
       }
 
