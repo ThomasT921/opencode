@@ -512,6 +512,8 @@ export const layer: Layer.Layer<
         return "stop"
       }
 
+      if (processor.message.error) return "stop"
+
       if (tail) {
         const tailMessage = yield* session.updateMessage({
           id: MessageID.ascending(),
@@ -623,7 +625,6 @@ export const layer: Layer.Layer<
         }
       }
 
-      if (processor.message.error) return "stop"
       if (result === "continue") {
         const summaryMessage = (yield* session.messages({ sessionID: input.sessionID })).find(
           (item) => item.info.id === msg.id,
