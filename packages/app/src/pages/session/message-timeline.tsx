@@ -106,6 +106,23 @@ function sameKeys(a: readonly string[] | undefined, b: readonly string[] | undef
   return a.every((key, index) => key === b[index])
 }
 
+const timelineCacheLimit = 16
+const timelineCache = new Map<string, { keys: readonly string[]; cache: VirtualizerHandle["cache"] }>()
+
+function readTimelineCache(id: string, keys: readonly string[]) {
+  const entry = timelineCache.get(id)
+  if (!entry) return
+  if (sameKeys(entry.keys, keys)) return entry.cache
+  timelineCache.delete(id)
+}
+
+function writeTimelineCache(id: string, keys: readonly string[], handle: VirtualizerHandle | undefined) {
+  if (!handle || keys.length === 0) return
+  timelineCache.delete(id)
+  timelineCache.set(id, { keys: keys.slice(), cache: handle.cache })
+  while (timelineCache.size > timelineCacheLimit) timelineCache.delete(timelineCache.keys().next().value!)
+}
+
 function samePartGroup(a: PartGroup, b: PartGroup) {
   if (a === b) return true
   if (a.key !== b.key) return false
@@ -664,6 +681,7 @@ export function MessageTimeline(props: {
     return reuseTimelineRows(previous, [...rows, { key: "bottom-spacer", type: "bottom-spacer" }])
   })
   const timelineRowKeys = createMemo(() => timelineRows().map((row) => row.key), [] as string[], { equals: sameKeys })
+  const virtualCache = createMemo(() => readTimelineCache(sessionKey(), timelineRowKeys()))
   const timelineRowByKey = createMemo(() => new Map(timelineRows().map((row) => [row.key, row] as const)))
   const messageRowIndex = createMemo(() => {
     const result = new Map<string, number>()
@@ -691,7 +709,29 @@ export function MessageTimeline(props: {
     })
   })
 
+  let cacheSessionKey = sessionKey()
+  let cacheRowKeys = timelineRowKeys()
+  let virtualizerSessionKey = cacheSessionKey
+  let virtualizerRowKeys = cacheRowKeys
+
+  createEffect(
+    on(
+      () => [sessionKey(), timelineRowKeys()] as const,
+      (next, prev) => {
+        if (prev && prev[0] !== next[0]) writeTimelineCache(prev[0], prev[1], virtualizer)
+        cacheSessionKey = next[0]
+        cacheRowKeys = next[1]
+        if (virtualizer) {
+          virtualizerSessionKey = cacheSessionKey
+          virtualizerRowKeys = cacheRowKeys
+        }
+      },
+      { defer: true },
+    ),
+  )
+
   onCleanup(() => {
+    writeTimelineCache(virtualizerSessionKey, virtualizerRowKeys, virtualizer)
     props.setRevealMessage?.(() => {})
   })
 
@@ -1628,11 +1668,19 @@ export function MessageTimeline(props: {
               {(root) => (
                 <Virtualizer
                   data={timelineRowKeys()}
+                  cache={virtualCache()}
                   scrollRef={root()}
                   shift={props.historyShift}
                   keepMounted={keepMounted()}
                   ref={(handle) => {
+                    if (!handle) {
+                      writeTimelineCache(virtualizerSessionKey, virtualizerRowKeys, virtualizer)
+                      virtualizer = undefined
+                      return
+                    }
                     virtualizer = handle
+                    virtualizerSessionKey = cacheSessionKey
+                    virtualizerRowKeys = cacheRowKeys
                     scheduleContentRoot(root())
                   }}
                 >
