@@ -56,6 +56,7 @@ import { Vcs } from "@/project/vcs"
 import { Worktree } from "@/worktree"
 import { Workspace } from "@/control-plane/workspace"
 import { SimulationFileSystem } from "@/testing/simulation/filesystem"
+import { SimulationNetwork } from "@/testing/simulation/network"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
 import { ServerAuth } from "@/server/auth"
@@ -233,7 +234,7 @@ export function createRoutes(
       Worktree.appLayer,
       Bus.layer,
       Flag.OPENCODE_MOCK ? SimulationFileSystem.layer({ root: "/opencode" }) : AppFileSystem.defaultLayer,
-      FetchHttpClient.layer,
+      Flag.OPENCODE_MOCK ? SimulationNetwork.denyUnknownLayer : FetchHttpClient.layer,
       HttpServer.layerServices,
     ]),
     Layer.provide(Layer.succeed(CorsConfig)(corsOptions)),
