@@ -362,7 +362,6 @@ function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSu
 
 function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
   const language = useLanguage()
-  const fileComponent = useFileComponent()
   const maxFiles = 10
   const [state, setState] = createStore({
     showAll: false,
@@ -396,7 +395,7 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
         >
           <For each={visible()}>
             {(diff) => {
-              const view = normalize(diff)
+              const opened = createMemo(() => expanded().includes(diff.file))
 
               return (
                 <Accordion.Item value={diff.file}>
@@ -421,9 +420,9 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
                     </Accordion.Trigger>
                   </StickyAccordionHeader>
                   <Accordion.Content>
-                    <div data-slot="session-turn-diff-view" data-scrollable>
-                      <Dynamic component={fileComponent} mode="diff" fileDiff={view.fileDiff} />
-                    </div>
+                    <Show when={opened()}>
+                      <TimelineDiffView diff={diff} />
+                    </Show>
                   </Accordion.Content>
                 </Accordion.Item>
               )
@@ -436,6 +435,17 @@ function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
           </div>
         </Show>
       </div>
+    </div>
+  )
+}
+
+function TimelineDiffView(props: { diff: SummaryDiff }) {
+  const fileComponent = useFileComponent()
+  const view = normalize(props.diff)
+
+  return (
+    <div data-slot="session-turn-diff-view" data-scrollable>
+      <Dynamic component={fileComponent} mode="diff" fileDiff={view.fileDiff} />
     </div>
   )
 }
