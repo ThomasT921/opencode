@@ -2,8 +2,17 @@ import type { CliRenderer, Renderable } from "@opentui/core"
 
 export interface MockInput {
   readonly typeText: (text: string) => Promise<void>
+  readonly pressKey: (key: string, modifiers?: KeyModifiers) => void
   readonly pressEnter: () => void
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
+}
+
+export interface KeyModifiers {
+  readonly ctrl?: boolean
+  readonly shift?: boolean
+  readonly meta?: boolean
+  readonly super?: boolean
+  readonly hyper?: boolean
 }
 
 export interface MockMouse {
@@ -32,6 +41,7 @@ export interface Element {
 
 export type Action =
   | { readonly type: "typeText"; readonly text: string }
+  | { readonly type: "pressKey"; readonly key: string; readonly modifiers?: KeyModifiers }
   | { readonly type: "pressEnter" }
   | { readonly type: "pressArrow"; readonly direction: "up" | "down" | "left" | "right" }
   | { readonly type: "focus"; readonly target: number }
@@ -107,6 +117,9 @@ export async function execute(harness: Harness, action: Action) {
   switch (action.type) {
     case "typeText":
       await harness.mockInput.typeText(action.text)
+      break
+    case "pressKey":
+      harness.mockInput.pressKey(action.key, action.modifiers)
       break
     case "pressEnter":
       harness.mockInput.pressEnter()

@@ -49,6 +49,21 @@ export interface SimulationMcpServer {
 
 const DefaultRemotePort = 43110
 const MaxPortAttempts = 100
+const MasterInstanceID = "master"
+
+interface RemoteInstance {
+  readonly id: string
+  readonly port: number
+  readonly url: string
+}
+
+interface JsonRpcResponse {
+  readonly result?: unknown
+  readonly error?: {
+    readonly code?: number
+    readonly message?: string
+  }
+}
 
 type RenderBuffer = {
   readonly width: number
@@ -60,6 +75,19 @@ const decoder = new TextDecoder()
 
 const ActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("typeText"), text: z.string() }),
+  z.object({
+    type: z.literal("pressKey"),
+    key: z.string(),
+    modifiers: z
+      .object({
+        ctrl: z.boolean().optional(),
+        shift: z.boolean().optional(),
+        meta: z.boolean().optional(),
+        super: z.boolean().optional(),
+        hyper: z.boolean().optional(),
+      })
+      .optional(),
+  }),
   z.object({ type: z.literal("pressEnter") }),
   z.object({ type: z.literal("pressArrow"), direction: z.enum(["up", "down", "left", "right"]) }),
   z.object({ type: z.literal("focus"), target: z.number() }),
@@ -115,6 +143,17 @@ const LlmScriptSchema = z.object({
   finish: z.enum(["stop", "tool-calls", "error", "length", "unknown"]).optional(),
 })
 
+const ScriptActionSchema = z.union([
+  ActionSchema,
+  z.object({ type: z.literal("writeFile"), path: z.string(), content: FileContentSchema }),
+  z.object({ type: z.literal("enqueueLLM"), scripts: z.array(LlmScriptSchema) }),
+  z.object({ type: z.literal("wait"), ms: z.number().min(0).max(30_000).optional() }),
+])
+
+const ScriptSchema = z.union([z.array(ScriptActionSchema), z.object({ actions: z.array(ScriptActionSchema) })])
+const TargetSchema = z.union([z.string(), z.array(z.string()).min(1), z.literal("all")])
+const remoteInstances = new Map<string, RemoteInstance>()
+
 function currentBuffer(renderer: CliRenderer): RenderBuffer {
   return Reflect.get(renderer, "currentRenderBuffer") as RenderBuffer
 }
@@ -123,6 +162,18 @@ function remotePort() {
   const port = Number(process.env.OPENCODE_SIMULATION_MCP_PORT)
   if (Number.isInteger(port) && port > 0 && port <= 65535) return port
   return DefaultRemotePort
+}
+
+function masterEnabled() {
+  return process.env.OPENCODE_SIMULATION_MCP_MASTER === "1" || process.env.OPENCODE_SIMULATION_MCP_MASTER === "true"
+}
+
+function childURL(port: number) {
+  return `http://127.0.0.1:${port}/mcp`
+}
+
+function jsonRpcError(response: JsonRpcResponse) {
+  return response.error?.message ?? `MCP request failed${response.error?.code === undefined ? "" : `: ${response.error.code}`}`
 }
 
 function isPortUnavailable(error: unknown) {
@@ -213,6 +264,126 @@ async function control(options: Options, method: string, pathname: string, body?
   throw new Error(typeof data?.error === "string" ? data.error : `Simulation control request failed: ${response.status}`)
 }
 
+async function mcpRequest(url: string, method: string, params: unknown, timeout = 500) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: crypto.randomUUID(), method, params }),
+    signal: AbortSignal.timeout(timeout),
+  })
+  if (!response.ok) throw new Error(`MCP request failed: HTTP ${response.status}`)
+  const data = (await response.json()) as JsonRpcResponse
+  if (data.error) throw new Error(jsonRpcError(data))
+  return data.result
+}
+
+async function initializeChild(url: string, timeout?: number) {
+  await mcpRequest(
+    url,
+    "initialize",
+    {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "opencode-simulation-master", version: InstallationVersion },
+    },
+    timeout,
+  )
+  await mcpRequest(url, "notifications/initialized", {}, timeout).catch(() => undefined)
+}
+
+async function childToolCall(instance: RemoteInstance, name: string, args: unknown) {
+  await initializeChild(instance.url, 2_000)
+  return mcpRequest(instance.url, "tools/call", { name, arguments: args }, 30_000)
+}
+
+function instances() {
+  return [{ id: MasterInstanceID, port: remotePort(), url: childURL(remotePort()) }, ...remoteInstances.values()]
+}
+
+function selectedTargets(target: z.infer<typeof TargetSchema>) {
+  const ids = target === "all" ? instances().map((item) => item.id) : Array.isArray(target) ? target : [target]
+  return ids.map((id) => {
+    if (id === MasterInstanceID) return { id, local: true as const }
+    const remote = remoteInstances.get(id)
+    if (!remote) throw new Error(`Unknown simulation instance: ${id}`)
+    return { id, local: false as const, remote }
+  })
+}
+
+async function discoverInstances(input: { startPort?: number; maxPorts?: number; consecutiveFailures?: number } = {}) {
+  const startPort = input.startPort ?? remotePort() + 1
+  const maxPorts = input.maxPorts ?? 30
+  const consecutiveFailures = input.consecutiveFailures ?? 3
+  let failures = 0
+  const found: RemoteInstance[] = []
+
+  for (let offset = 0; offset < maxPorts && failures < consecutiveFailures; offset++) {
+    const port = startPort + offset
+    if (port === remotePort()) continue
+    const instance = { id: `simulation-${port}`, port, url: childURL(port) }
+    try {
+      await initializeChild(instance.url)
+      await childToolCall(instance, "simulation_control_snapshot", {})
+      remoteInstances.set(instance.id, instance)
+      found.push(instance)
+      failures = 0
+    } catch {
+      failures++
+      remoteInstances.delete(instance.id)
+    }
+  }
+
+  return { instances: instances(), discovered: found, scanned: { startPort, maxPorts, consecutiveFailures } }
+}
+
+async function runScript(options: Options, file: string) {
+  const parsed = ScriptSchema.parse(await Bun.file(file).json())
+  const actions = Array.isArray(parsed) ? parsed : parsed.actions
+  const counts = { uiActions: 0, fileWrites: 0, llmScriptsQueued: 0, waits: 0 }
+
+  for (const action of actions) {
+    if (action.type === "writeFile") {
+      await control(options, "POST", "/experimental/simulation/filesystem/write", {
+        path: action.path,
+        content: action.content,
+      })
+      counts.fileWrites++
+      continue
+    }
+    if (action.type === "enqueueLLM") {
+      await control(options, "POST", "/experimental/simulation/llm/enqueue", { scripts: action.scripts })
+      counts.llmScriptsQueued += action.scripts.length
+      continue
+    }
+    if (action.type === "wait") {
+      await new Promise((resolve) => setTimeout(resolve, action.ms ?? 1_000))
+      await current(options).harness.renderOnce()
+      counts.waits++
+      continue
+    }
+    await SimulationActions.execute(current(options).harness, action)
+    counts.uiActions++
+  }
+
+  return { file, actions: actions.length, ...counts, snapshot: snapshot(options) }
+}
+
+async function runOnTargets<A>(
+  options: Options,
+  target: z.infer<typeof TargetSchema>,
+  local: () => Promise<A>,
+  remote: (instance: RemoteInstance) => Promise<unknown>,
+) {
+  const output = []
+  for (const item of selectedTargets(target)) {
+    output.push({ id: item.id, result: item.local ? await local() : await remote(item.remote) })
+  }
+  return { results: output, snapshot: snapshot(options) }
+}
+
 function createServer(options: Options) {
   const server = new McpServer(
     { name: "opencode-simulation", version: InstallationVersion },
@@ -282,6 +453,14 @@ function createServer(options: Options) {
       return toolResult(snapshot(options))
     },
   )
+  server.registerTool(
+    "simulation_script_run",
+    {
+      description: "Run a JSON simulation script from a host filesystem path.",
+      inputSchema: z.object({ path: z.string() }),
+    },
+    async (input) => toolResult(await runScript(options, input.path)),
+  )
 
   if ("runtime" in options) {
     server.registerTool("simulation_restart", { description: "Restart the simulated TUI and backend while keeping MCP alive." }, async () =>
@@ -327,6 +506,91 @@ function createServer(options: Options) {
   server.registerTool("simulation_control_snapshot", { description: "Get backend simulation state snapshot." }, async () =>
     toolResult(await control(options, "GET", "/experimental/simulation/snapshot")),
   )
+
+  if (masterEnabled()) {
+    server.registerTool(
+      "simulation_instances_discover",
+      {
+        description: "Discover child simulation MCP servers on sequential localhost ports.",
+        inputSchema: z.object({
+          startPort: z.number().optional(),
+          maxPorts: z.number().optional(),
+          consecutiveFailures: z.number().optional(),
+        }),
+      },
+      async (input) => toolResult(await discoverInstances(input)),
+    )
+    server.registerTool("simulation_instances_list", { description: "List known simulation instances." }, () =>
+      toolResult({ instances: instances() }),
+    )
+    server.registerTool(
+      "simulation_instances_action_execute",
+      {
+        description: "Execute one UI action on one or more simulation instances.",
+        inputSchema: z.object({ target: TargetSchema, action: ActionSchema }),
+      },
+      async (input) =>
+        toolResult(
+          await runOnTargets(
+            options,
+            input.target,
+            async () => {
+              await SimulationActions.execute(current(options).harness, input.action)
+              return snapshot(options)
+            },
+            (instance) => childToolCall(instance, "simulation_action_execute", { action: input.action }),
+          ),
+        ),
+    )
+    server.registerTool(
+      "simulation_instances_filesystem_write",
+      {
+        description: "Write one file on one or more simulation instances.",
+        inputSchema: z.object({ target: TargetSchema, path: z.string(), content: FileContentSchema }),
+      },
+      async (input) =>
+        toolResult(
+          await runOnTargets(
+            options,
+            input.target,
+            () => control(options, "POST", "/experimental/simulation/filesystem/write", { path: input.path, content: input.content }),
+            (instance) => childToolCall(instance, "simulation_control_filesystem_write", { path: input.path, content: input.content }),
+          ),
+        ),
+    )
+    server.registerTool(
+      "simulation_instances_llm_enqueue",
+      {
+        description: "Queue LLM scripts on one or more simulation instances.",
+        inputSchema: z.object({ target: TargetSchema, scripts: z.array(LlmScriptSchema) }),
+      },
+      async (input) =>
+        toolResult(
+          await runOnTargets(
+            options,
+            input.target,
+            () => control(options, "POST", "/experimental/simulation/llm/enqueue", { scripts: input.scripts }),
+            (instance) => childToolCall(instance, "simulation_control_llm_enqueue", { scripts: input.scripts }),
+          ),
+        ),
+    )
+    server.registerTool(
+      "simulation_instances_script_run",
+      {
+        description: "Run a JSON simulation script on one or more simulation instances.",
+        inputSchema: z.object({ target: TargetSchema, path: z.string() }),
+      },
+      async (input) =>
+        toolResult(
+          await runOnTargets(
+            options,
+            input.target,
+            () => runScript(options, input.path),
+            (instance) => childToolCall(instance, "simulation_script_run", { path: input.path }),
+          ),
+        ),
+    )
+  }
 
   return server
 }
