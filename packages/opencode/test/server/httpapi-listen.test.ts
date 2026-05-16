@@ -297,6 +297,7 @@ describe("HttpApi Server.listen", () => {
     try {
       expect(listener.type).toBe("socket")
       expect(listener.socket).toBe(socket)
+      expect(listener.url.href).toBe(`socket:${encodeURIComponent(socket)}`)
 
       const response = await requestSocketRoot(socket)
       expect(response.statusCode).toBe(200)

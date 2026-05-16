@@ -30,6 +30,7 @@ export type TcpListener = {
 export type SocketListener = {
   type: "socket"
   socket: string
+  url: URL
   stop: (close?: boolean) => Promise<void>
 }
 
@@ -101,6 +102,7 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
     return {
       type: "socket" as const,
       socket: listener.socket,
+      url: listener.url,
       stop,
     }
   }
@@ -117,9 +119,12 @@ const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unkno
   function* (opts: ListenOptions) {
     const state = yield* startWithPortFallback(opts)
     if (opts.type === "socket") {
+      const listenerUrl = makeSocketURL(opts.socket)
+
       return {
         type: "socket" as const,
         socket: opts.socket,
+        url: listenerUrl,
         stop: yield* makeStop(state, Effect.void),
       }
     }
@@ -193,6 +198,10 @@ function makeURL(hostname: string, port?: number) {
   result.hostname = hostname
   if (port !== undefined) result.port = String(port)
   return result
+}
+
+function makeSocketURL(socket: string) {
+  return new URL(`socket:${encodeURIComponent(socket)}`)
 }
 
 function setupMdns(opts: TcpListenOptions, port: number, scope: Scope.Scope) {
