@@ -67,6 +67,7 @@ export const Definitions = {
   sidebar_toggle: keybind("<leader>b", "Toggle sidebar"),
   scrollbar_toggle: keybind("none", "Toggle session scrollbar"),
   status_view: keybind("<leader>s", "View status"),
+  diff_open: keybind("<leader>d", "Open diff viewer"),
 
   session_export: keybind("<leader>x", "Export session to editor"),
   session_copy: keybind("none", "Copy session transcript"),
@@ -251,6 +252,7 @@ export const CommandMap = {
   sidebar_toggle: "session.sidebar.toggle",
   scrollbar_toggle: "session.toggle.scrollbar",
   status_view: "opencode.status",
+  diff_open: "diff.open",
   session_export: "session.export",
   session_copy: "session.copy",
   session_new: "session.new",

@@ -68,6 +68,7 @@ import { createTuiAttention } from "@/cli/cmd/tui/attention"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { CommandPaletteProvider, useCommandPalette } from "./context/command-palette"
 import { OpencodeKeymapProvider, registerOpencodeKeymap, useBindings, useOpencodeKeymap } from "./keymap"
+import { DiffViewer } from "./routes/diff"
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
@@ -102,6 +103,7 @@ const appBindingCommands = [
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
+  "diff.open",
   "help.show",
   "docs.open",
   "app.debug",
@@ -352,6 +354,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
     renderer.clearSelection()
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
+  const [diffOpen, setDiffOpen] = createSignal(false)
   const [pasteSummaryEnabled, setPasteSummaryEnabled] = createSignal(
     kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary),
   )
@@ -664,6 +667,16 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         category: "System",
       },
       {
+        name: "diff.open",
+        title: "Open diff viewer",
+        slashName: "diff",
+        run: () => {
+          setDiffOpen(true)
+          dialog.clear()
+        },
+        category: "VCS",
+      },
+      {
         name: "help.show",
         title: "Help",
         slashName: "help",
@@ -962,6 +975,9 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
           <TuiPluginRuntime.Slot name="app_bottom" />
         </box>
         <TuiPluginRuntime.Slot name="app" />
+        <Show when={diffOpen()}>
+          <DiffViewer onClose={() => setDiffOpen(false)} />
+        </Show>
       </Show>
       <StartupLoading ready={ready} />
     </box>

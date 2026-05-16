@@ -152,6 +152,12 @@ const ScriptActionSchema = z.union([
 
 const ScriptSchema = z.union([z.array(ScriptActionSchema), z.object({ actions: z.array(ScriptActionSchema) })])
 const TargetSchema = z.union([z.string(), z.array(z.string()).min(1), z.literal("all")])
+const BackendFetchSchema = z.object({
+  url: z.string(),
+  method: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.unknown().optional(),
+})
 const remoteInstances = new Map<string, RemoteInstance>()
 
 function currentBuffer(renderer: CliRenderer): RenderBuffer {
@@ -262,6 +268,27 @@ async function control(options: Options, method: string, pathname: string, body?
   const data = text ? JSON.parse(text) : undefined
   if (response.ok) return data
   throw new Error(typeof data?.error === "string" ? data.error : `Simulation control request failed: ${response.status}`)
+}
+
+async function backendFetch(options: Options, input: z.infer<typeof BackendFetchSchema>) {
+  const running = current(options)
+  const headers = new Headers(input.headers)
+  const body =
+    input.body === undefined ? undefined : typeof input.body === "string" ? input.body : JSON.stringify(input.body)
+  if (body !== undefined && !headers.has("content-type") && typeof input.body !== "string") headers.set("content-type", "application/json")
+
+  const response = await (running.controlFetch ?? fetch)(new URL(input.url, running.controlUrl), {
+    method: input.method ?? (body === undefined ? "GET" : "POST"),
+    headers,
+    body,
+  })
+  return {
+    url: response.url,
+    status: response.status,
+    ok: response.ok,
+    headers: Object.fromEntries(response.headers.entries()),
+    body: await response.text(),
+  }
 }
 
 async function mcpRequest(url: string, method: string, params: unknown, timeout = 500) {
@@ -431,6 +458,14 @@ function createServer(options: Options) {
     await current(options).harness.renderOnce()
     return toolResult(snapshot(options))
   })
+  server.registerTool(
+    "simulation_backend_fetch",
+    {
+      description: "Proxy one fetch request through the simulated backend and return the raw response.",
+      inputSchema: BackendFetchSchema,
+    },
+    async (input) => toolResult(await backendFetch(options, input)),
+  )
   server.registerTool(
     "simulation_action_execute",
     {
