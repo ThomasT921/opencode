@@ -88,11 +88,9 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
 const listenEffect: (opts: ListenOptions) => Effect.Effect<EffectListener, unknown> = Effect.fn("Server.listen")(
   function* (opts: ListenOptions) {
     const state = yield* startWithPortFallback(opts)
-    const address = state.server.address
+    if (opts.socket) return yield* makeSocketListener(state, opts.socket)
 
-    if (address._tag === "UnixAddress") return yield* makeSocketListener(state, address.path)
-    if (opts.socket) return yield* unexpectedAddress(state)
-
+    const address = yield* tcpAddress(state)
     const listenerUrl = makeURL(opts.hostname, address.port)
     url = listenerUrl
 
@@ -150,7 +148,7 @@ function startListener(opts: ListenOptions, port: number) {
 
 function makeSocketListener(state: ListenerState, socket: string) {
   return Effect.gen(function* () {
-    const listenerUrl = makeURL("localhost")
+    const listenerUrl = makeURL("localhost", 0)
     url = listenerUrl
 
     return {
@@ -163,17 +161,18 @@ function makeSocketListener(state: ListenerState, socket: string) {
   })
 }
 
-function unexpectedAddress(state: ListenerState) {
+function tcpAddress(state: ListenerState) {
   return Effect.gen(function* () {
+    if (state.server.address._tag === "TcpAddress") return state.server.address
     yield* Scope.close(state.scope, Exit.void).pipe(Effect.ignore)
     return yield* Effect.die(new Error(`Unexpected HttpServer address tag: ${state.server.address._tag}`))
   })
 }
 
-function makeURL(hostname: string, port?: number) {
+function makeURL(hostname: string, port: number) {
   const result = new URL("http://localhost")
   result.hostname = hostname
-  if (port !== undefined) result.port = String(port)
+  result.port = String(port)
   return result
 }
 
