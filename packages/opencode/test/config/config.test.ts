@@ -32,14 +32,11 @@ import { Filesystem } from "@/util/filesystem"
 import { ConfigPlugin } from "@/config/plugin"
 import { Npm } from "@opencode-ai/core/npm"
 import { Substitution } from "@opencode-ai/core/substitution"
+import { AuthWellKnownTest } from "../fake/auth-well-known"
 
 const emptyAccount = Layer.mock(Account.Service)({
   active: () => Effect.succeed(Option.none()),
   activeOrg: () => Effect.succeed(Option.none()),
-})
-
-const emptyAuthWellKnown = Layer.mock(AuthWellKnown.Service)({
-  configs: () => Effect.succeed([]),
 })
 
 const testFlock = EffectFlock.defaultLayer
@@ -58,7 +55,7 @@ const layer = Config.layer.pipe(
   Layer.provide(AppFileSystem.defaultLayer),
   Layer.provide(Substitution.defaultLayer),
   Layer.provide(Env.defaultLayer),
-  Layer.provide(emptyAuthWellKnown),
+  Layer.provide(AuthWellKnownTest.empty),
   Layer.provide(emptyAccount),
   Layer.provideMerge(infra),
   Layer.provide(noopNpm),
@@ -595,7 +592,7 @@ test("resolves env templates in account config with account token", async () => 
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(Substitution.defaultLayer),
     Layer.provide(Env.defaultLayer),
-    Layer.provide(emptyAuthWellKnown),
+    Layer.provide(AuthWellKnownTest.empty),
     Layer.provide(fakeAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),
@@ -1107,7 +1104,7 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(Substitution.defaultLayer),
     Layer.provide(Env.defaultLayer),
-    Layer.provide(emptyAuthWellKnown),
+    Layer.provide(AuthWellKnownTest.empty),
     Layer.provide(emptyAccount),
     Layer.provideMerge(infra),
     Layer.provide(noopNpm),

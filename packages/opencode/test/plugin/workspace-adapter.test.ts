@@ -4,7 +4,6 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
-import { AuthWellKnown } from "@opencode-ai/core/auth-well-known"
 import { Substitution } from "@opencode-ai/core/substitution"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -27,6 +26,7 @@ import { SyncEvent } from "../../src/sync"
 import { disposeAllInstances, provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { NpmTest } from "../fake/npm"
+import { AuthWellKnownTest } from "../fake/auth-well-known"
 
 const emptyAccount = Layer.mock(Account.Service)({
   active: () => Effect.succeed(Option.none()),
@@ -35,13 +35,10 @@ const emptyAccount = Layer.mock(Account.Service)({
 const emptyAuth = Layer.mock(Auth.Service)({
   all: () => Effect.succeed({}),
 })
-const emptyAuthWellKnown = Layer.mock(AuthWellKnown.Service)({
-  configs: () => Effect.succeed([]),
-})
 const configLayer = Config.layer.pipe(
   Layer.provide(EffectFlock.defaultLayer),
   Layer.provide(AppFileSystem.defaultLayer),
-  Layer.provide(emptyAuthWellKnown),
+  Layer.provide(AuthWellKnownTest.empty),
   Layer.provide(Substitution.defaultLayer),
   Layer.provide(Env.defaultLayer),
   Layer.provide(emptyAuth),
