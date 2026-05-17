@@ -1,5 +1,7 @@
-import { Config as EffectConfig, Context, Effect, Layer } from "effect"
+import { Config as EffectConfig, Context, Effect, Layer, FileSystem, Path } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { NodePath } from "@effect/platform-node"
+import { Git } from "@/git"
 import { HttpApiBuilder, OpenApi } from "effect/unstable/httpapi"
 import {
   FetchHttpClient,
@@ -32,7 +34,10 @@ import { MCP } from "@/mcp"
 import { McpAuth } from "@/mcp/auth"
 import { Permission } from "@/permission"
 import { Installation } from "@/installation"
+import { InstanceStore } from "@/project/instance-store"
 import { InstanceLayer } from "@/project/instance-layer"
+import { InstanceBootstrap } from "@/project/bootstrap"
+import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { Npm } from "@opencode-ai/core/npm"
 import { Env } from "@/env"
 import { Plugin } from "@/plugin"
@@ -287,113 +292,339 @@ function createProductionRoutes(
 
 export function createSimulatedRoutes(corsOptions?: CorsOptions): ReturnType<typeof createProductionRoutes> {
   const fs = new InMemoryFs()
-  const simulationBoundary = Layer.mergeAll(
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Pattern: `consumer.pipe(Layer.provideMerge(dep))` — `consumer` (LHS) CAN
+  // see `dep` (RHS). We build STRICTLY bottom-up via topological sort:
+  // consumers at the START of the pipe, deepest leaves at the END.
+  //
+  // Each tier is built and TYPE-ANNOTATED with its expected `Layer.Layer<
+  // ROut, E, RIn>` so we can verify the composition is correct step by step.
+  // ────────────────────────────────────────────────────────────────────────
+
+  // ─── Tier 0: true leaves with NO app deps ───────────────────────────────
+  // Provides: everything in this Layer.mergeAll. Requires: nothing.
+  // (SimulationGit needs AppFileSystem; goes in tier1.)
+  type Tier0Services =
+    | AppFileSystem.Service
+    | FileSystem.FileSystem
+    | ChildProcessSpawner.ChildProcessSpawner
+    | HttpClient.HttpClient
+    | SimulationNetwork.Service
+    | Path.Path
+    | Global.Service
+    | Env.Service
+    | Bus.Service
+    | AccountRepo.Service
+    | ShareNext.Service
+    | SyncEvent.Service
+    | PtyTicket.Service
+
+  const tier0: Layer.Layer<Tier0Services, never, never> = Layer.mergeAll(
     SimulationFileSystem.layer({
       root: "/opencode",
       fs,
       files: {
         ".git/HEAD": "ref: refs/heads/main\n",
-        ".git/config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[branch \"main\"]\n",
+        ".git/config": '[core]\n\trepositoryformatversion = 0\n\tbare = false\n[branch "main"]\n',
       },
     }),
+    // SimulationFileSystem.layer no longer provides FileSystem.FileSystem; satisfy
+    // it with a no-op so nothing in the chain falls back to NodeFileSystem.
+    FileSystem.layerNoop({}),
     SimulationSpawner.layer({ root: "/opencode", fs }),
     SimulationNetwork.layer({ entries: SimulationNetworkRoutes.defaults(), allowLoopback: true }),
+    NodePath.layer,
+    Global.layer,
+    Env.layer,
+    Bus.layer,
+    AccountRepo.layer,
+    simulationShareNextLayer,
+    SyncEvent.layer,
+    PtyTicket.layer,
   )
 
-  const simulatedRoutes = Layer.mergeAll(
-    rootApiRoutes,
-    eventApiRoutes,
-    instanceRoutes,
-    docRoute,
-    uiRoute,
-    simulationRoute,
+  // ─── Tier 1: services depending only on tier 0 ──────────────────────────
+  // SimulationGit → AppFileSystem
+  // Truncate → AppFileSystem
+  // Auth → AppFileSystem
+  // McpAuth → AppFileSystem
+  // EffectFlock → Global, AppFileSystem
+  // Permission → Bus
+  // Todo → Bus
+  // Question → Bus
+  // SessionStatus → Bus
+  // Discovery → AppFileSystem, Path, HttpClient
+  // Ripgrep → AppFileSystem, HttpClient, ChildProcessSpawner
+  // Account → AccountRepo, HttpClient
+  const tier1: Layer.Layer<
+    | Tier0Services
+    | Git.Service
+    | Truncate.Service
+    | Auth.Service
+    | McpAuth.Service
+    | EffectFlock.Service
+    | Permission.Service
+    | Todo.Service
+    | Question.Service
+    | SessionStatus.Service
+    | Discovery.Service
+    | Ripgrep.Service
+    | Account.Service,
+    never,
+    never
+  > = Layer.mergeAll(
+    SimulationGit.layer,
+    Truncate.layer,
+    Auth.layer,
+    McpAuth.layer,
+    EffectFlock.layer,
+    Permission.layer,
+    Todo.layer,
+    Question.layer,
+    SessionStatus.layer,
+    Discovery.layer,
+    Ripgrep.layer,
+    Account.layer,
+  ).pipe(Layer.provideMerge(tier0))
+
+  type Tier1Services =
+    | Tier0Services
+    | Git.Service
+    | Truncate.Service
+    | Auth.Service
+    | McpAuth.Service
+    | EffectFlock.Service
+    | Permission.Service
+    | Todo.Service
+    | Question.Service
+    | SessionStatus.Service
+    | Discovery.Service
+    | Ripgrep.Service
+    | Account.Service
+
+  // ─── Tier 2: services depending only on tier 0 + tier 1 ─────────────────
+  // Npm → AppFileSystem, Global, FileSystem, EffectFlock
+  // ModelsDev → AppFileSystem, HttpClient
+  // Project → AppFileSystem, Path, ChildProcessSpawner, Bus
+  // Installation → HttpClient, ChildProcessSpawner
+  // Storage → AppFileSystem, Git
+  // Vcs → Git, Bus
+  // SessionRunState → SessionStatus
+  const tier2: Layer.Layer<
+    | Tier1Services
+    | Npm.Service
+    | ModelsDev.Service
+    | Project.Service
+    | Installation.Service
+    | Storage.Service
+    | Vcs.Service
+    | SessionRunState.Service,
+    never,
+    never
+  > = Layer.mergeAll(
+    Npm.layer,
+    ModelsDev.layer,
+    Project.layer,
+    Installation.layer,
+    Storage.layer,
+    Vcs.layer,
+    SessionRunState.layer,
+  ).pipe(Layer.provideMerge(tier1))
+
+  type Tier2Services =
+    | Tier1Services
+    | Npm.Service
+    | ModelsDev.Service
+    | Project.Service
+    | Installation.Service
+    | Storage.Service
+    | Vcs.Service
+    | SessionRunState.Service
+
+  // ─── Tier 3: services depending only on tier 0-2 ────────────────────────
+  // Config → AppFileSystem, Auth, Account, Env, Npm
+  // File → AppFileSystem, Ripgrep, Git, Scope
+  // Simulation → AppFileSystem, SimulationNetwork
+  // Session → Bus, Storage, SyncEvent
+  const tier3: Layer.Layer<
+    Tier2Services | Config.Service | File.Service | Simulation.Service | Session.Service,
+    never,
+    never
+  > = Layer.mergeAll(Config.layer, File.layer, Simulation.layer, Session.layer).pipe(Layer.provideMerge(tier2))
+
+  type Tier3Services = Tier2Services | Config.Service | File.Service | Simulation.Service | Session.Service
+
+  // ─── Tier 4: services depending on tier 0-3 (mostly Config) ─────────────
+  // Plugin → Bus, Config
+  // FileWatcher → Config, Git
+  // Format → Config, ChildProcessSpawner
+  // Snapshot → AppFileSystem, ChildProcessSpawner, Config
+  // LSP → Config
+  // MCP → ChildProcessSpawner, McpAuth, Bus, Config
+  // Skill → Discovery, Config, Bus, AppFileSystem, Global
+  // Instruction → Config, AppFileSystem, Global, HttpClient
+  // SimulationProvider → Simulation (provides Provider tag)
+  const tier4: Layer.Layer<
+    | Tier3Services
+    | Plugin.Service
+    | FileWatcher.Service
+    | Format.Service
+    | Snapshot.Service
+    | LSP.Service
+    | MCP.Service
+    | Skill.Service
+    | Instruction.Service
+    | Provider.Service,
+    never,
+    never
+  > = Layer.mergeAll(
+    Plugin.layer,
+    FileWatcher.layer,
+    Format.layer,
+    Snapshot.layer,
+    LSP.layer,
+    MCP.layer,
+    Skill.layer,
+    Instruction.layer,
+    SimulationProvider.layer,
+  ).pipe(Layer.provideMerge(tier3))
+
+  type Tier4Services =
+    | Tier3Services
+    | Plugin.Service
+    | FileWatcher.Service
+    | Format.Service
+    | Snapshot.Service
+    | LSP.Service
+    | MCP.Service
+    | Skill.Service
+    | Instruction.Service
+    | Provider.Service
+
+  // ─── Tier 5: services depending on tier 0-4 ─────────────────────────────
+  // Pty → Config, Bus, Plugin
+  // ProviderAuth → Auth, Plugin
+  // SessionSummary → Session, Snapshot, Storage, Bus
+  // Agent → Config, Auth, Plugin, Skill, Provider
+  // Command → Config, MCP, Skill
+  // LLM → Auth, Config, Provider, Plugin, Permission
+  // SystemPrompt → Skill
+  const tier5: Layer.Layer<
+    | Tier4Services
+    | Pty.Service
+    | ProviderAuth.Service
+    | SessionSummary.Service
+    | Agent.Service
+    | Command.Service
+    | LLM.Service
+    | SystemPrompt.Service,
+    never,
+    never
+  > = Layer.mergeAll(
+    Pty.layer,
+    ProviderAuth.layer,
+    SessionSummary.layer,
+    Agent.layer,
+    Command.layer,
+    LLM.layer,
+    SystemPrompt.layer,
+  ).pipe(Layer.provideMerge(tier4))
+
+  type Tier5Services =
+    | Tier4Services
+    | Pty.Service
+    | ProviderAuth.Service
+    | SessionSummary.Service
+    | Agent.Service
+    | Command.Service
+    | LLM.Service
+    | SystemPrompt.Service
+
+  // ─── Tier 6: services depending on tier 0-5 ─────────────────────────────
+  // SessionRevert → Session, Snapshot, Storage, Bus, SessionSummary, SessionRunState, SyncEvent
+  // SessionProcessor → Session, Config, Bus, Snapshot, Agent, LLM, Permission, Plugin,
+  //                    SessionSummary, Scope, SessionStatus
+  // SessionShare → Config, Session, ShareNext, SyncEvent
+  const tier6: Layer.Layer<
+    Tier5Services | SessionRevert.Service | SessionProcessor.Service | SessionShare.Service,
+    never,
+    never
+  > = Layer.mergeAll(SessionRevert.layer, SessionProcessor.layer, SessionShare.layer).pipe(Layer.provideMerge(tier5))
+
+  type Tier6Services = Tier5Services | SessionRevert.Service | SessionProcessor.Service | SessionShare.Service
+
+  // ─── Tier 7: services depending on tier 0-6 ─────────────────────────────
+  // SessionCompaction → Bus, Config, Session, Agent, Plugin, SessionProcessor, Provider
+  // SessionPrompt → Bus, SessionStatus, Session, Agent, Provider, SessionProcessor,
+  //                 SessionCompaction(!), Plugin, Command, Config, Permission, AppFileSystem,
+  //                 MCP, LSP, ToolRegistry(!), Truncate, ChildProcessSpawner, Instruction,
+  //                 SessionRunState, SessionRevert, SessionSummary, SystemPrompt, LLM
+  // ToolRegistry → Config, Plugin, Agent, Skill, Truncate, Question, Todo, Session,
+  //                Provider, Git, LSP, Instruction, AppFileSystem, Bus, HttpClient,
+  //                ChildProcessSpawner, Ripgrep, Format
+  //
+  // SessionPrompt needs SessionCompaction AND ToolRegistry — so it's tier 8.
+  const tier7: Layer.Layer<Tier6Services | SessionCompaction.Service | ToolRegistry.Service, never, never> =
+    Layer.mergeAll(SessionCompaction.layer, ToolRegistry.layer).pipe(Layer.provideMerge(tier6))
+
+  type Tier7Services = Tier6Services | SessionCompaction.Service | ToolRegistry.Service
+
+  // ─── Tier 8: services depending on tier 0-7 ─────────────────────────────
+  // SessionPrompt → tier 7 (SessionCompaction, ToolRegistry, etc.)
+  // (Workspace needs SessionPrompt — goes to tier 9)
+  const tier8: Layer.Layer<Tier7Services | SessionPrompt.Service, never, never> = Layer.mergeAll(
+    SessionPrompt.layer,
+  ).pipe(Layer.provideMerge(tier7))
+
+  type Tier8Services = Tier7Services | SessionPrompt.Service
+
+  // ─── Tier 9: Workspace + InstanceBootstrap (depend on tier 0-8) ─────────
+  // Workspace → Auth, Session, SessionPrompt, HttpClient, SyncEvent, Vcs
+  // InstanceBootstrap → Config, File, FileWatcher, Format, LSP, Plugin, Project,
+  //                     ShareNext, Snapshot, Vcs
+  const tier9: Layer.Layer<Tier8Services | Workspace.Service | InstanceBootstrap.Service, never, never> =
+    Layer.mergeAll(Workspace.layer, InstanceBootstrap.layer).pipe(Layer.provideMerge(tier8))
+
+  type Tier9Services = Tier8Services | Workspace.Service | InstanceBootstrap.Service
+
+  // ─── Tier 10: InstanceStore + Worktree (depend on InstanceBootstrap) ────
+  // InstanceStore → Project, InstanceBootstrap
+  // Worktree → AppFileSystem, Path, ChildProcessSpawner, Git, Project, InstanceStore
+  //            (Worktree → InstanceStore → tier 10 itself, so Worktree is tier 11)
+  const tier10: Layer.Layer<Tier9Services | InstanceStore.Service, never, never> = Layer.mergeAll(
+    InstanceStore.layer,
+  ).pipe(Layer.provideMerge(tier9))
+
+  type Tier10Services = Tier9Services | InstanceStore.Service
+
+  // ─── Tier 11: Worktree (depends on InstanceStore) ───────────────────────
+  const tier11: Layer.Layer<Tier10Services | Worktree.Service, never, never> = Layer.mergeAll(Worktree.layer).pipe(
+    Layer.provideMerge(tier10),
   )
 
-  const withRouteAndLeafServices = simulatedRoutes.pipe(
-    Layer.provideMerge(errorLayer),
-    Layer.provideMerge(compressionLayer),
-    Layer.provideMerge(corsVaryFix),
-    Layer.provideMerge(fenceLayer),
-    Layer.provideMerge(cors(corsOptions)),
-    Layer.provideMerge(runtime),
-    Layer.provideMerge(File.layer),
-    Layer.provideMerge(FileWatcher.layer),
-    Layer.provideMerge(Installation.layer),
-    Layer.provideMerge(ModelsDev.layer),
-  )
+  // ─── Tier 12: HTTP-level middleware + platform ──────────────────────────
+  // Handles Request<"Error", *>, HttpRouter, HttpPlatform, Generator, etc.
+  const tier12 = Layer.mergeAll(
+    errorLayer,
+    compressionLayer,
+    corsVaryFix,
+    fenceLayer,
+    cors(corsOptions),
+    HttpServer.layerServices,
+  ).pipe(Layer.provideMerge(tier11))
 
-  const withEndpointServices = withRouteAndLeafServices.pipe(
-    Layer.provideMerge(ProviderAuth.layer),
-    Layer.provideMerge(Pty.layer),
-    Layer.provideMerge(PtyTicket.layer),
-    Layer.provideMerge(SessionShare.layer),
-    Layer.provideMerge(simulationShareNextLayer),
-    Layer.provideMerge(Workspace.layer),
-    Layer.provideMerge(Worktree.layer),
-    Layer.provideMerge(HttpServer.layerServices),
-  )
-
-  const withSessionAndToolConsumers = withEndpointServices.pipe(
-    Layer.provideMerge(Project.layer),
-    Layer.provideMerge(SessionPrompt.layer),
-    Layer.provideMerge(SessionRevert.layer),
-    Layer.provideMerge(ToolRegistry.layer),
-    Layer.provideMerge(SessionCompaction.layer),
-    Layer.provideMerge(SessionProcessor.layer),
-    Layer.provideMerge(SessionSummary.layer),
-    Layer.provideMerge(Agent.layer),
-    Layer.provideMerge(Command.layer),
-  )
-
-  const withToolDependencies = withSessionAndToolConsumers.pipe(
-    Layer.provideMerge(Vcs.layer),
-    Layer.provideMerge(Ripgrep.layer),
-    Layer.provideMerge(Format.layer),
-    Layer.provideMerge(Todo.layer),
-    Layer.provideMerge(Question.layer),
-    Layer.provideMerge(Truncate.layer),
-    Layer.provideMerge(Instruction.layer),
-    Layer.provideMerge(Snapshot.layer),
-    Layer.provideMerge(LSP.layer),
-    Layer.provideMerge(MCP.layer),
-    Layer.provideMerge(SyncEvent.layer),
-  )
-
-  const withSessionProviderDependencies = withToolDependencies.pipe(
-    Layer.provideMerge(McpAuth.layer),
-    Layer.provideMerge(SessionRunState.layer),
-    Layer.provideMerge(SessionStatus.layer),
-    Layer.provideMerge(Session.layer),
-    Layer.provideMerge(Storage.layer),
-    Layer.provideMerge(LLM.layer),
-    Layer.provideMerge(SystemPrompt.layer),
-    Layer.provideMerge(Skill.layer),
-    Layer.provideMerge(Discovery.layer),
-  )
-
-  const withCoreAppServices = withSessionProviderDependencies.pipe(
-    Layer.provideMerge(Plugin.layer),
-    Layer.provideMerge(Permission.layer),
-    Layer.provideMerge(SimulationProvider.layer),
-    Layer.provideMerge(Simulation.layer),
-    Layer.provideMerge(Config.layer),
-    Layer.provideMerge(Account.layer),
-    Layer.provideMerge(Auth.layer),
-    Layer.provideMerge(AccountRepo.layer),
-  )
-
-  return withCoreAppServices.pipe(
-    Layer.provideMerge(SimulationGit.layer),
-    Layer.provideMerge(Npm.layer),
-    Layer.provideMerge(Env.layer),
-    Layer.provideMerge(Bus.layer),
-    Layer.provideMerge(Global.layer),
-    Layer.provideMerge(NodePath.layer),
-    Layer.provideMerge(simulationBoundary),
+  return Layer.mergeAll(rootApiRoutes, eventApiRoutes, instanceRoutes, docRoute, uiRoute, simulationRoute).pipe(
+    Layer.provide(tier12),
     Layer.provideMerge(Layer.succeed(CorsConfig)(corsOptions)),
-    Layer.provideMerge(InstanceLayer.layer),
+    // Build a simulated InstanceLayer equivalent that exposes InstanceStore.Service in
+    // the result's `ROut` (matching the production layer's shape) WITHOUT pulling in
+    // `InstanceLayer.layer` from `@/project/instance-layer` — that one uses
+    // `InstanceStore.defaultLayer` + `InstanceBootstrap.defaultLayer` which transitively
+    // pull `AppFileSystem.defaultLayer` and `NodeFileSystem.layer` into our chain.
+    Layer.provideMerge(InstanceStore.layer.pipe(Layer.provide(InstanceBootstrap.layer), Layer.provide(tier9))),
     Layer.provideMerge(Observability.layer),
-  ) as ReturnType<typeof createProductionRoutes>
+  )
 }
 
 export function createRoutes(corsOptions?: CorsOptions) {
