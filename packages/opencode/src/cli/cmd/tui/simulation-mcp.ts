@@ -129,6 +129,12 @@ const LlmScriptActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), content: z.string() }),
   z.object({ type: z.literal("thinking"), content: z.string() }),
   z.object({ type: z.literal("error"), message: z.string() }),
+  z.object({
+    type: z.literal("tool-call"),
+    toolCallId: z.string(),
+    toolName: z.string(),
+    input: z.any(),
+  }),
 ])
 
 const LlmScriptSchema = z.object({

@@ -1,0 +1,50 @@
+{
+  "actions": [
+    { "type": "pressKey", "key": "x", "modifiers": { "ctrl": true } },
+    { "type": "pressKey", "key": "b" },
+    { "type": "writeFile", "path": "src/greeting.ts", "content": "export function greet(name: string) {\n  return `Hi, ${name}`\n}\n" },
+    {
+      "type": "enqueueLLM",
+      "scripts": [
+        {
+          "steps": [
+            [
+              { "type": "text", "content": "Looking at `src/greeting.ts`, the function currently returns `\"Hi, …\"`. " },
+              { "type": "text", "content": "You asked for a friendlier greeting, so I'll change the prefix from `Hi` to `Hello`. " },
+              { "type": "text", "content": "I'll keep the template literal and the `name` interpolation untouched. " },
+              { "type": "text", "content": "Here's the plan: I'll use the `edit` tool to replace the single return line. " },
+              { "type": "text", "content": "Patching `src/greeting.ts` now." },
+              {
+                "type": "tool-call",
+                "toolCallId": "patch-greeting-1",
+                "toolName": "edit",
+                "input": {
+                  "filePath": "/opencode/src/greeting.ts",
+                  "oldString": "return `Hi, ${name}`",
+                  "newString": "return `Hello, ${name}`"
+                }
+              }
+            ]
+          ],
+          "usage": { "inputTokens": 320, "outputTokens": 90, "totalTokens": 410 },
+          "finish": "tool-calls"
+        },
+        {
+          "steps": [
+            [
+              { "type": "text", "content": "Done — `src/greeting.ts` now returns `Hello, ${name}`." }
+            ]
+          ],
+          "usage": { "inputTokens": 140, "outputTokens": 16, "totalTokens": 156 },
+          "finish": "stop"
+        }
+      ]
+    },
+    { "type": "typeText", "text": "Make the greeting friendlier — use \"Hello\" instead of \"Hi\" in src/greeting.ts." },
+    { "type": "pressEnter" },
+    { "type": "wait", "ms": 1500 },
+    { "type": "typeText", "text": "!cat src/greeting.ts" },
+    { "type": "pressEnter" },
+    { "type": "wait", "ms": 800 }
+  ]
+}

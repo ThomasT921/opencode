@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
+import { streamText, tool, jsonSchema } from "ai"
 import { Effect, Layer } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Provider } from "../../../src/provider/provider"
@@ -187,6 +188,154 @@ describe("Simulation", () => {
         },
       ])
       expect((yield* simulation.snapshot()).llmConsumed).toBe(1)
+    }),
+  )
+
+  it.effect("simulation provider streams queued tool-call actions", () =>
+    Effect.gen(function* () {
+      const simulation = yield* Simulation.Service
+      const provider = yield* Provider.Service
+      const model = yield* provider.defaultModel().pipe(Effect.flatMap((item) => provider.getModel(item.providerID, item.modelID)))
+      const language = yield* provider.getLanguage(model)
+
+      yield* simulation.enqueueLLM({
+        scripts: [
+          {
+            steps: [
+              [
+                { type: "text", content: "I'll write that file for you" },
+                {
+                  type: "tool-call",
+                  toolCallId: "call-1",
+                  toolName: "write",
+                  input: { filePath: "/opencode/hello.txt", content: "hi" },
+                },
+              ],
+            ],
+            finish: "tool-calls",
+          },
+        ],
+      })
+
+      const result = yield* Effect.promise(() => language.doStream({ prompt: [], abortSignal: undefined }))
+      const reader = result.stream.getReader()
+      const parts: unknown[] = []
+      while (true) {
+        const next = yield* Effect.promise(() => reader.read())
+        if (next.done) break
+        parts.push(next.value)
+      }
+
+      const expectedInput = JSON.stringify({ filePath: "/opencode/hello.txt", content: "hi" })
+      expect(parts).toContainEqual({ type: "tool-input-start", id: "call-1", toolName: "write" })
+      expect(parts).toContainEqual({ type: "tool-input-delta", id: "call-1", delta: expectedInput })
+      expect(parts).toContainEqual({ type: "tool-input-end", id: "call-1" })
+      expect(parts).toContainEqual({ type: "tool-call", toolCallId: "call-1", toolName: "write", input: expectedInput })
+      const finish = parts.find((p: any) => p?.type === "finish") as any
+      expect(finish?.finishReason).toEqual({ unified: "tool-calls", raw: "tool-calls" })
+    }),
+  )
+
+  it.effect("simulation provider doGenerate returns tool-call content", () =>
+    Effect.gen(function* () {
+      const simulation = yield* Simulation.Service
+      const provider = yield* Provider.Service
+      const model = yield* provider.defaultModel().pipe(Effect.flatMap((item) => provider.getModel(item.providerID, item.modelID)))
+      const language = yield* provider.getLanguage(model)
+
+      yield* simulation.enqueueLLM({
+        scripts: [
+          {
+            steps: [
+              [
+                { type: "text", content: "writing now" },
+                {
+                  type: "tool-call",
+                  toolCallId: "call-9",
+                  toolName: "write",
+                  input: { filePath: "/opencode/a.txt", content: "x" },
+                },
+              ],
+            ],
+            finish: "tool-calls",
+          },
+        ],
+      })
+
+      const result = yield* Effect.promise(() => language.doGenerate({ prompt: [], abortSignal: undefined }))
+      expect(result.content).toEqual([
+        { type: "text", text: "writing now" },
+        {
+          type: "tool-call",
+          toolCallId: "call-9",
+          toolName: "write",
+          input: JSON.stringify({ filePath: "/opencode/a.txt", content: "x" }),
+        },
+      ])
+      expect(result.finishReason).toEqual({ unified: "tool-calls", raw: "tool-calls" })
+    }),
+  )
+
+  it.effect("simulation model advertises toolcall capability", () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      const model = yield* provider.defaultModel().pipe(Effect.flatMap((item) => provider.getModel(item.providerID, item.modelID)))
+      expect(model.capabilities.toolcall).toBe(true)
+    }),
+  )
+
+  it.effect("AI SDK streamText invokes tool.execute when the simulated provider emits a tool-call", () =>
+    Effect.gen(function* () {
+      const simulation = yield* Simulation.Service
+      const provider = yield* Provider.Service
+      const model = yield* provider.defaultModel().pipe(Effect.flatMap((item) => provider.getModel(item.providerID, item.modelID)))
+      const language = yield* provider.getLanguage(model)
+
+      yield* simulation.enqueueLLM({
+        scripts: [
+          {
+            steps: [
+              [
+                { type: "text", content: "writing now" },
+                {
+                  type: "tool-call",
+                  toolCallId: "call-execute-1",
+                  toolName: "write",
+                  input: { filePath: "/opencode/from-tool.txt", content: "hello from tool" },
+                },
+              ],
+            ],
+            finish: "tool-calls",
+          },
+        ],
+      })
+
+      const executed: Array<{ filePath: string; content: string }> = []
+      const result = streamText({
+        model: language,
+        prompt: "please write the file",
+        tools: {
+          write: tool({
+            description: "Write a file",
+            inputSchema: jsonSchema<{ filePath: string; content: string }>({
+              type: "object",
+              properties: { filePath: { type: "string" }, content: { type: "string" } },
+              required: ["filePath", "content"],
+            }),
+            execute(args) {
+              executed.push(args)
+              return Promise.resolve({ ok: true, path: args.filePath })
+            },
+          }),
+        },
+      })
+
+      // Drain the stream so streamText runs to completion.
+      yield* Effect.promise(async () => {
+        for await (const _ of result.fullStream) void _
+      })
+
+      expect(executed).toEqual([{ filePath: "/opencode/from-tool.txt", content: "hello from tool" }])
     }),
   )
 })

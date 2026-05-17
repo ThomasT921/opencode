@@ -47,6 +47,12 @@ export const LLMScriptAction = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), content: Schema.String }),
   Schema.Struct({ type: Schema.Literal("thinking"), content: Schema.String }),
   Schema.Struct({ type: Schema.Literal("error"), message: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("tool-call"),
+    toolCallId: Schema.String,
+    toolName: Schema.String,
+    input: Schema.Json,
+  }),
 ])
 
 export type LLMScriptAction = typeof LLMScriptAction.Type

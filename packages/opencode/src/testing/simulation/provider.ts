@@ -1,4 +1,10 @@
-import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3FinishReason, LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import type {
+  LanguageModelV3,
+  LanguageModelV3CallOptions,
+  LanguageModelV3Content,
+  LanguageModelV3FinishReason,
+  LanguageModelV3StreamPart,
+} from "@ai-sdk/provider"
 import { simulateReadableStream } from "ai"
 import { Effect, Layer } from "effect"
 import { Provider } from "@/provider/provider"
@@ -18,7 +24,7 @@ const model: Provider.Model = {
     temperature: true,
     reasoning: true,
     attachment: false,
-    toolcall: false,
+    toolcall: true,
     input: { text: true, audio: false, image: false, video: false, pdf: false },
     output: { text: true, audio: false, image: false, video: false, pdf: false },
     interleaved: false,
@@ -75,6 +81,16 @@ function stream(script: LLMScript) {
       )
       continue
     }
+    if (item.type === "tool-call") {
+      const input = JSON.stringify(item.input)
+      chunks.push(
+        { type: "tool-input-start", id: item.toolCallId, toolName: item.toolName },
+        { type: "tool-input-delta", id: item.toolCallId, delta: input },
+        { type: "tool-input-end", id: item.toolCallId },
+        { type: "tool-call", toolCallId: item.toolCallId, toolName: item.toolName, input },
+      )
+      continue
+    }
     chunks.push(
       { type: "text-start", id },
       { type: "text-delta", id, delta: item.content },
@@ -122,8 +138,20 @@ function language(simulation: Simulation.Interface): LanguageModelV3 {
       const script = await nextScript(simulation)
       const err = error(script)
       if (err?.type === "error") throw new Error(err.message)
+      const content: LanguageModelV3Content[] = []
+      const textValue = text(script)
+      if (textValue) content.push({ type: "text", text: textValue })
+      for (const item of script.steps[0] ?? []) {
+        if (item.type !== "tool-call") continue
+        content.push({
+          type: "tool-call",
+          toolCallId: item.toolCallId,
+          toolName: item.toolName,
+          input: JSON.stringify(item.input),
+        })
+      }
       return {
-        content: [{ type: "text", text: text(script) }],
+        content,
         finishReason: finishReason(script),
         usage: usage(script),
         warnings: [],
