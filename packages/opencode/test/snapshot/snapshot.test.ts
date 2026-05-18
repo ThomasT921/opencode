@@ -476,6 +476,99 @@ it.instance(
   { git: true },
 )
 
+it.live(
+  "subdirectory instances stage snapshot files relative to the worktree root",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    const subdir = `${dir}/src`
+    yield* mkdirp(subdir)
+    yield* write(`${subdir}/tracked.txt`, "tracked content")
+    yield* exec(dir, ["git", "add", "."])
+    yield* exec(dir, ["git", "commit", "-m", "add subdir"])
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* write(`${subdir}/date.txt`, "subdirectory content")
+      const patch = yield* snapshot.patch(before!)
+      expect(patch.files).toContain(fwd(subdir, "date.txt"))
+    }).pipe(provideInstance(subdir))
+  }),
+)
+
+it.live(
+  "subdirectory instances keep gitignored snapshot files out of patches",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    const subdir = `${dir}/src`
+    yield* mkdirp(subdir)
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      yield* write(`${subdir}/later-ignored.txt`, "initial content")
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* write(`${subdir}/later-ignored.txt`, "modified content")
+      yield* write(`${subdir}/.gitignore`, "later-ignored.txt\n")
+      yield* write(`${subdir}/still-tracked.txt`, "new tracked file")
+      const patch = yield* snapshot.patch(before!)
+      expect(patch.files).not.toContain(fwd(subdir, "later-ignored.txt"))
+      expect(patch.files).toContain(fwd(subdir, ".gitignore"))
+      expect(patch.files).toContain(fwd(subdir, "still-tracked.txt"))
+    }).pipe(provideInstance(subdir))
+  }),
+)
+
+it.live(
+  "subdirectory restore does not overwrite files outside the subdirectory",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    const subdir = `${dir}/src`
+    yield* write(`${dir}/root.txt`, "original root")
+    yield* write(`${subdir}/file.txt`, "original src")
+    yield* exec(dir, ["git", "add", "."])
+    yield* exec(dir, ["git", "commit", "-m", "init"])
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      yield* write(`${dir}/root.txt`, "root snapshot")
+      expect(yield* snapshot.track()).toBeTruthy()
+    }).pipe(provideInstance(dir))
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      yield* write(`${subdir}/file.txt`, "src snapshot")
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* write(`${dir}/root.txt`, "root current")
+      yield* write(`${subdir}/file.txt`, "src current")
+      yield* snapshot.restore(before!)
+      expect(yield* readText(`${dir}/root.txt`)).toBe("root current")
+      expect(yield* readText(`${subdir}/file.txt`)).toBe("src snapshot")
+    }).pipe(provideInstance(subdir))
+  }),
+)
+
+it.live(
+  "subdirectory scope is treated as a literal git pathspec",
+  Effect.gen(function* () {
+    const dir = yield* scopedGitTmpdir()
+    const subdir = `${dir}/src*`
+    const sibling = `${dir}/srca`
+    yield* write(`${subdir}/file.txt`, "literal original")
+    yield* write(`${sibling}/file.txt`, "sibling original")
+    yield* exec(dir, ["git", "add", "."])
+    yield* exec(dir, ["git", "commit", "-m", "init"])
+    yield* Effect.gen(function* () {
+      const snapshot = yield* Snapshot.Service
+      const before = yield* snapshot.track()
+      expect(before).toBeTruthy()
+      yield* write(`${subdir}/file.txt`, "literal modified")
+      yield* write(`${sibling}/file.txt`, "sibling modified")
+      const patch = yield* snapshot.patch(before!)
+      expect(patch.files).toContain(fwd(subdir, "file.txt"))
+      expect(patch.files).not.toContain(fwd(sibling, "file.txt"))
+    }).pipe(provideInstance(subdir))
+  }),
+)
+
 it.instance(
   "gitignore updated between track calls filters from diff",
   withTrackedSnapshot(({ tmp, snapshot, before }) =>

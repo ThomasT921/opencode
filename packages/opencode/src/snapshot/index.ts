@@ -85,6 +85,10 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
           const args = (cmd: string[]) => ["--git-dir", state.gitdir, "--work-tree", state.worktree, ...cmd]
 
           const feed = (list: string[]) => list.join("\0") + "\0"
+          const feedSpec = (list: string[]) => feed(list.map((item) => `:(top,literal)${item}`))
+
+          const scope = path.relative(state.worktree, state.directory).replaceAll("\\", "/")
+          const spec = scope ? `:(top,literal)${scope}` : "."
 
           const git = Effect.fnUntraced(
             function* (cmd: string[], opts?: { cwd?: string; env?: Record<string, string>; stdin?: string }) {
@@ -122,7 +126,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
                 "-z",
               ],
               {
-                cwd: state.directory,
+                cwd: state.worktree,
                 stdin: feed(files),
               },
             )
@@ -138,8 +142,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
                 ...args(["rm", "--cached", "-f", "--ignore-unmatch", "--pathspec-from-file=-", "--pathspec-file-nul"]),
               ],
               {
-                cwd: state.directory,
-                stdin: feed(files),
+                cwd: state.worktree,
+                stdin: feedSpec(files),
               },
             )
           })
@@ -149,8 +153,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
             const result = yield* git(
               [...cfg, ...args(["add", "--all", "--sparse", "--pathspec-from-file=-", "--pathspec-file-nul"])],
               {
-                cwd: state.directory,
-                stdin: feed(files),
+                cwd: state.worktree,
+                stdin: feedSpec(files),
               },
             )
             if (result.code === 0) return
@@ -197,11 +201,11 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
             yield* sync()
             const [diff, other] = yield* Effect.all(
               [
-                git([...quote, ...args(["diff-files", "--name-only", "-z", "--", "."])], {
-                  cwd: state.directory,
+                git([...quote, ...args(["diff-files", "--name-only", "-z", "--", spec])], {
+                  cwd: state.worktree,
                 }),
-                git([...quote, ...args(["ls-files", "--others", "--exclude-standard", "-z", "--", "."])], {
-                  cwd: state.directory,
+                git([...quote, ...args(["ls-files", "--others", "--exclude-standard", "-z", "--", spec])], {
+                  cwd: state.worktree,
                 }),
               ],
               { concurrency: 2 },
@@ -239,7 +243,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
               (yield* Effect.all(
                 allow.map((item) =>
                   fs
-                    .stat(path.join(state.directory, item))
+                    .stat(path.join(state.worktree, item))
                     .pipe(Effect.catch(() => Effect.void))
                     .pipe(
                       Effect.map((stat) => {
@@ -306,9 +310,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
               Effect.gen(function* () {
                 yield* add()
                 const result = yield* git(
-                  [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--name-only", hash, "--", "."])],
+                  [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--name-only", hash, "--", spec])],
                   {
-                    cwd: state.directory,
+                    cwd: state.worktree,
                   },
                 )
                 if (result.code !== 0) {
@@ -338,24 +342,47 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
             return yield* locked(
               Effect.gen(function* () {
                 log.info("restore", { commit: snapshot })
-                const result = yield* git([...core, ...args(["read-tree", snapshot])], { cwd: state.worktree })
-                if (result.code === 0) {
-                  const checkout = yield* git([...core, ...args(["checkout-index", "-a", "-f"])], {
-                    cwd: state.worktree,
-                  })
-                  if (checkout.code === 0) return
-                  log.error("failed to restore snapshot", {
+                const listed = yield* git([...quote, ...args(["ls-tree", "-r", "-z", "--name-only", snapshot, "--", spec])], {
+                  cwd: state.worktree,
+                })
+                if (listed.code !== 0) {
+                  log.error("failed to list snapshot files", {
                     snapshot,
-                    exitCode: checkout.code,
-                    stderr: checkout.stderr,
+                    exitCode: listed.code,
+                    stderr: listed.stderr,
                   })
                   return
                 }
-                log.error("failed to restore snapshot", {
-                  snapshot,
-                  exitCode: result.code,
-                  stderr: result.stderr,
-                })
+                const files = listed.text.split("\0").filter(Boolean)
+                if (!files.length) return
+
+                const index = path.join(state.gitdir, "restore.index")
+                yield* remove(index)
+                yield* Effect.gen(function* () {
+                  const result = yield* git([...core, ...args(["read-tree", `--index-output=${index}`, snapshot])], {
+                    cwd: state.worktree,
+                  })
+                  if (result.code === 0) {
+                    const checkout = yield* git([...core, ...args(["checkout-index", "-f", "--stdin", "-z"])], {
+                      cwd: state.worktree,
+                      env: { GIT_INDEX_FILE: index },
+                      stdin: feed(files),
+                    })
+                    if (checkout.code === 0) return
+                    log.error("failed to restore snapshot", {
+                      snapshot,
+                      exitCode: checkout.code,
+                      stderr: checkout.stderr,
+                    })
+                    return
+                  }
+
+                  log.error("failed to restore snapshot", {
+                    snapshot,
+                    exitCode: result.code,
+                    stderr: result.stderr,
+                  })
+                }).pipe(Effect.ensuring(remove(index)))
               }),
             )
           })
@@ -479,9 +506,12 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
             return yield* locked(
               Effect.gen(function* () {
                 yield* add()
-                const result = yield* git([...quote, ...args(["diff", "--cached", "--no-ext-diff", hash, "--", "."])], {
-                  cwd: state.worktree,
-                })
+                const result = yield* git(
+                  [...quote, ...args(["diff", "--cached", "--no-ext-diff", hash, "--", spec])],
+                  {
+                    cwd: state.worktree,
+                  },
+                )
                 if (result.code !== 0) {
                   log.warn("failed to get diff", {
                     hash,
@@ -637,8 +667,8 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
                 const status = new Map<string, "added" | "deleted" | "modified">()
 
                 const statuses = yield* git(
-                  [...quote, ...args(["diff", "--no-ext-diff", "--name-status", "--no-renames", from, to, "--", "."])],
-                  { cwd: state.directory },
+                  [...quote, ...args(["diff", "--no-ext-diff", "--name-status", "--no-renames", from, to, "--", spec])],
+                  { cwd: state.worktree },
                 )
 
                 for (const line of statuses.text.trim().split("\n")) {
@@ -649,9 +679,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | AppProce
                 }
 
                 const numstat = yield* git(
-                  [...quote, ...args(["diff", "--no-ext-diff", "--no-renames", "--numstat", from, to, "--", "."])],
+                  [...quote, ...args(["diff", "--no-ext-diff", "--no-renames", "--numstat", from, to, "--", spec])],
                   {
-                    cwd: state.directory,
+                    cwd: state.worktree,
                   },
                 )
 
