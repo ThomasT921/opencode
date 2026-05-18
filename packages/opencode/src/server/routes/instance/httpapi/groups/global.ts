@@ -1,6 +1,5 @@
 import { Config } from "@/config/config"
 import { BusEvent } from "@/bus/bus-event"
-import { SyncEvent } from "@/sync"
 import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
@@ -15,7 +14,10 @@ const GlobalEventSchema = Schema.Struct({
   directory: Schema.String,
   project: Schema.optional(Schema.String),
   workspace: Schema.optional(Schema.String),
-  payload: Schema.Union([...BusEvent.effectPayloads(), ...SyncEvent.effectPayloads()]),
+  // One shape per event. Source-of-truth sync metadata, when present, is
+  // carried as an optional `sync` field inside the payload — see
+  // `BusEvent.effectPayloads()`.
+  payload: Schema.Union(BusEvent.effectPayloads()),
 }).annotate({ identifier: "GlobalEvent" })
 
 export const GlobalUpgradeInput = Schema.Struct({

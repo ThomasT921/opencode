@@ -4,7 +4,6 @@
 // Remove that registry read when event schemas are generated from core directly.
 import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
-import { GlobalBus } from "@/bus/global"
 import { Bus as ProjectBus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import type { InstanceContext } from "@/project/instance-context"
@@ -356,10 +355,16 @@ function process<Def extends Definition>(
           throw new Error("SyncEvent.process: publish requires instance context")
         }
 
+        const sync: ProjectBus.SyncMetadata = {
+          name: versionedType(def.type, def.version),
+          seq: event.seq,
+          aggregateID: event.aggregateID,
+          data: event.data,
+        }
         const result = convertEvent(def.type, event.data)
         const publish = (data: unknown) =>
           Effect.runPromise(
-            attachWith(options.bus.publish(def, data as Properties<Def>, { id: event.id }), {
+            attachWith(options.bus.publish(def, data as Properties<Def>, { id: event.id, sync }), {
               instance: options.context?.instance,
               workspace: options.context?.workspace,
             }),
@@ -369,19 +374,6 @@ function process<Def extends Definition>(
         } else {
           void publish(result)
         }
-
-        GlobalBus.emit("event", {
-          directory: options.context.instance.directory,
-          project: options.context.instance.project.id,
-          workspace: options.context.workspace,
-          payload: {
-            type: "sync",
-            syncEvent: {
-              type: versionedType(def.type, def.version),
-              ...event,
-            },
-          },
-        })
       }
     })
   })

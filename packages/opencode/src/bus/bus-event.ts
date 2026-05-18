@@ -17,6 +17,17 @@ export function define<Type extends string, Properties extends Schema.Top>(
   return result
 }
 
+// Optional source-of-truth metadata for event-sourcing replay. Present on
+// GlobalBus events that originated from `SyncEvent.run`; absent on transient
+// bus events that don't have an event log entry. Consumers that replay the
+// event log (cross-instance sync) filter by `payload.sync != null`.
+const Sync = Schema.Struct({
+  name: Schema.String,
+  seq: Schema.Finite,
+  aggregateID: Schema.String,
+  data: Schema.Unknown,
+}).annotate({ identifier: "Event.Sync" })
+
 export function effectPayloads() {
   return [
     ...registry
@@ -26,6 +37,7 @@ export function effectPayloads() {
           id: Schema.String,
           type: Schema.Literal(type),
           properties: def.properties,
+          sync: Schema.optional(Sync),
         }).annotate({ identifier: `Event.${type}` }),
       )
       .toArray(),
@@ -36,6 +48,7 @@ export function effectPayloads() {
           id: Schema.String,
           type: Schema.Literal(definition.type),
           properties: definition.data,
+          sync: Schema.optional(Sync),
         }).annotate({ identifier: `Event.${definition.type}` }),
       )
       .toArray(),

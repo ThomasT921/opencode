@@ -5,10 +5,10 @@ export type ClientOptions = {
 }
 
 export type Event =
-  | EventTuiPromptAppend
-  | EventTuiCommandExecute
+  | EventTuiPromptAppend1
+  | EventTuiCommandExecute1
   | EventTuiToastShow1
-  | EventTuiSessionSelect
+  | EventTuiSessionSelect1
   | EventServerConnected
   | EventGlobalDisposed
   | EventServerInstanceDisposed
@@ -110,6 +110,7 @@ export type EventTuiPromptAppend = {
   properties: {
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventTuiCommandExecute = {
@@ -135,6 +136,7 @@ export type EventTuiCommandExecute = {
       | "agent.cycle"
       | string
   }
+  sync?: EventSync
 }
 
 export type EventTuiToastShow = {
@@ -146,6 +148,7 @@ export type EventTuiToastShow = {
     variant: "info" | "success" | "warning" | "error"
     duration?: number
   }
+  sync?: EventSync
 }
 
 export type EventTuiSessionSelect = {
@@ -157,6 +160,7 @@ export type EventTuiSessionSelect = {
      */
     sessionID: string
   }
+  sync?: EventSync
 }
 
 export type PermissionRequest = {
@@ -863,39 +867,6 @@ export type GlobalEvent = {
     | EventSessionNextCompactionDelta
     | EventSessionNextCompactionEnded
     | EventCatalogModelUpdated
-    | SyncEventMessageUpdated
-    | SyncEventMessageRemoved
-    | SyncEventMessagePartUpdated
-    | SyncEventMessagePartRemoved
-    | SyncEventSessionCreated
-    | SyncEventSessionUpdated
-    | SyncEventSessionDeleted
-    | SyncEventSessionNextAgentSwitched
-    | SyncEventSessionNextModelSwitched
-    | SyncEventSessionNextPrompted
-    | SyncEventSessionNextSynthetic
-    | SyncEventSessionNextShellStarted
-    | SyncEventSessionNextShellEnded
-    | SyncEventSessionNextStepStarted
-    | SyncEventSessionNextStepEnded
-    | SyncEventSessionNextStepFailed
-    | SyncEventSessionNextTextStarted
-    | SyncEventSessionNextTextDelta
-    | SyncEventSessionNextTextEnded
-    | SyncEventSessionNextReasoningStarted
-    | SyncEventSessionNextReasoningDelta
-    | SyncEventSessionNextReasoningEnded
-    | SyncEventSessionNextToolInputStarted
-    | SyncEventSessionNextToolInputDelta
-    | SyncEventSessionNextToolInputEnded
-    | SyncEventSessionNextToolCalled
-    | SyncEventSessionNextToolProgress
-    | SyncEventSessionNextToolSuccess
-    | SyncEventSessionNextToolFailed
-    | SyncEventSessionNextRetried
-    | SyncEventSessionNextCompactionStarted
-    | SyncEventSessionNextCompactionDelta
-    | SyncEventSessionNextCompactionEnded
 }
 
 /**
@@ -2403,12 +2374,20 @@ export type SyncEventSessionNextCompactionEnded = {
   }
 }
 
+export type EventSync = {
+  name: string
+  seq: number
+  aggregateID: string
+  data: unknown
+}
+
 export type EventServerConnected = {
   id: string
   type: "server.connected"
   properties: {
     [key: string]: unknown
   }
+  sync?: EventSync
 }
 
 export type EventGlobalDisposed = {
@@ -2417,6 +2396,7 @@ export type EventGlobalDisposed = {
   properties: {
     [key: string]: unknown
   }
+  sync?: EventSync
 }
 
 export type EventServerInstanceDisposed = {
@@ -2425,6 +2405,7 @@ export type EventServerInstanceDisposed = {
   properties: {
     directory: string
   }
+  sync?: EventSync
 }
 
 export type EventFileEdited = {
@@ -2433,6 +2414,7 @@ export type EventFileEdited = {
   properties: {
     file: string
   }
+  sync?: EventSync
 }
 
 export type EventFileWatcherUpdated = {
@@ -2442,6 +2424,7 @@ export type EventFileWatcherUpdated = {
     file: string
     event: "add" | "change" | "unlink"
   }
+  sync?: EventSync
 }
 
 export type EventLspClientDiagnostics = {
@@ -2451,6 +2434,7 @@ export type EventLspClientDiagnostics = {
     serverID: string
     path: string
   }
+  sync?: EventSync
 }
 
 export type EventLspUpdated = {
@@ -2459,6 +2443,7 @@ export type EventLspUpdated = {
   properties: {
     [key: string]: unknown
   }
+  sync?: EventSync
 }
 
 export type EventMessagePartDelta = {
@@ -2471,12 +2456,14 @@ export type EventMessagePartDelta = {
     field: string
     delta: string
   }
+  sync?: EventSync
 }
 
 export type EventPermissionAsked = {
   id: string
   type: "permission.asked"
   properties: PermissionRequest
+  sync?: EventSync
 }
 
 export type EventPermissionReplied = {
@@ -2487,6 +2474,7 @@ export type EventPermissionReplied = {
     requestID: string
     reply: "once" | "always" | "reject"
   }
+  sync?: EventSync
 }
 
 export type EventSessionDiff = {
@@ -2496,6 +2484,7 @@ export type EventSessionDiff = {
     sessionID: string
     diff: Array<SnapshotFileDiff>
   }
+  sync?: EventSync
 }
 
 export type EventSessionError = {
@@ -2512,24 +2501,28 @@ export type EventSessionError = {
       | ContextOverflowError
       | ApiError
   }
+  sync?: EventSync
 }
 
 export type EventQuestionAsked = {
   id: string
   type: "question.asked"
   properties: QuestionRequest
+  sync?: EventSync
 }
 
 export type EventQuestionReplied = {
   id: string
   type: "question.replied"
   properties: QuestionReplied
+  sync?: EventSync
 }
 
 export type EventQuestionRejected = {
   id: string
   type: "question.rejected"
   properties: QuestionRejected
+  sync?: EventSync
 }
 
 export type EventTodoUpdated = {
@@ -2539,6 +2532,7 @@ export type EventTodoUpdated = {
     sessionID: string
     todos: Array<Todo>
   }
+  sync?: EventSync
 }
 
 export type EventSessionStatus = {
@@ -2548,6 +2542,7 @@ export type EventSessionStatus = {
     sessionID: string
     status: SessionStatus
   }
+  sync?: EventSync
 }
 
 export type EventSessionIdle = {
@@ -2556,6 +2551,7 @@ export type EventSessionIdle = {
   properties: {
     sessionID: string
   }
+  sync?: EventSync
 }
 
 export type EventMcpToolsChanged = {
@@ -2564,6 +2560,7 @@ export type EventMcpToolsChanged = {
   properties: {
     server: string
   }
+  sync?: EventSync
 }
 
 export type EventMcpBrowserOpenFailed = {
@@ -2573,6 +2570,7 @@ export type EventMcpBrowserOpenFailed = {
     mcpName: string
     url: string
   }
+  sync?: EventSync
 }
 
 export type EventCommandExecuted = {
@@ -2584,12 +2582,14 @@ export type EventCommandExecuted = {
     arguments: string
     messageID: string
   }
+  sync?: EventSync
 }
 
 export type EventProjectUpdated = {
   id: string
   type: "project.updated"
   properties: Project
+  sync?: EventSync
 }
 
 export type EventSessionCompacted = {
@@ -2598,6 +2598,7 @@ export type EventSessionCompacted = {
   properties: {
     sessionID: string
   }
+  sync?: EventSync
 }
 
 export type EventVcsBranchUpdated = {
@@ -2606,6 +2607,7 @@ export type EventVcsBranchUpdated = {
   properties: {
     branch?: string
   }
+  sync?: EventSync
 }
 
 export type EventWorkspaceReady = {
@@ -2614,6 +2616,7 @@ export type EventWorkspaceReady = {
   properties: {
     name: string
   }
+  sync?: EventSync
 }
 
 export type EventWorkspaceFailed = {
@@ -2622,6 +2625,7 @@ export type EventWorkspaceFailed = {
   properties: {
     message: string
   }
+  sync?: EventSync
 }
 
 export type EventWorkspaceStatus = {
@@ -2631,6 +2635,7 @@ export type EventWorkspaceStatus = {
     workspaceID: string
     status: "connected" | "connecting" | "disconnected" | "error"
   }
+  sync?: EventSync
 }
 
 export type EventWorktreeReady = {
@@ -2640,6 +2645,7 @@ export type EventWorktreeReady = {
     name: string
     branch?: string
   }
+  sync?: EventSync
 }
 
 export type EventWorktreeFailed = {
@@ -2648,6 +2654,7 @@ export type EventWorktreeFailed = {
   properties: {
     message: string
   }
+  sync?: EventSync
 }
 
 export type EventPtyCreated = {
@@ -2656,6 +2663,7 @@ export type EventPtyCreated = {
   properties: {
     info: Pty
   }
+  sync?: EventSync
 }
 
 export type EventPtyUpdated = {
@@ -2664,6 +2672,7 @@ export type EventPtyUpdated = {
   properties: {
     info: Pty
   }
+  sync?: EventSync
 }
 
 export type EventPtyExited = {
@@ -2673,6 +2682,7 @@ export type EventPtyExited = {
     id: string
     exitCode: number
   }
+  sync?: EventSync
 }
 
 export type EventPtyDeleted = {
@@ -2681,6 +2691,7 @@ export type EventPtyDeleted = {
   properties: {
     id: string
   }
+  sync?: EventSync
 }
 
 export type EventInstallationUpdated = {
@@ -2689,6 +2700,7 @@ export type EventInstallationUpdated = {
   properties: {
     version: string
   }
+  sync?: EventSync
 }
 
 export type EventInstallationUpdateAvailable = {
@@ -2697,6 +2709,7 @@ export type EventInstallationUpdateAvailable = {
   properties: {
     version: string
   }
+  sync?: EventSync
 }
 
 export type EventMessageUpdated = {
@@ -2706,6 +2719,7 @@ export type EventMessageUpdated = {
     sessionID: string
     info: Message
   }
+  sync?: EventSync
 }
 
 export type EventMessageRemoved = {
@@ -2715,6 +2729,7 @@ export type EventMessageRemoved = {
     sessionID: string
     messageID: string
   }
+  sync?: EventSync
 }
 
 export type EventMessagePartUpdated = {
@@ -2725,6 +2740,7 @@ export type EventMessagePartUpdated = {
     part: Part
     time: number
   }
+  sync?: EventSync
 }
 
 export type EventMessagePartRemoved = {
@@ -2735,6 +2751,7 @@ export type EventMessagePartRemoved = {
     messageID: string
     partID: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionCreated = {
@@ -2744,6 +2761,7 @@ export type EventSessionCreated = {
     sessionID: string
     info: Session
   }
+  sync?: EventSync
 }
 
 export type EventSessionUpdated = {
@@ -2753,6 +2771,7 @@ export type EventSessionUpdated = {
     sessionID: string
     info: Session
   }
+  sync?: EventSync
 }
 
 export type EventSessionDeleted = {
@@ -2762,6 +2781,7 @@ export type EventSessionDeleted = {
     sessionID: string
     info: Session
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextAgentSwitched = {
@@ -2772,6 +2792,7 @@ export type EventSessionNextAgentSwitched = {
     sessionID: string
     agent: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextModelSwitched = {
@@ -2786,6 +2807,7 @@ export type EventSessionNextModelSwitched = {
       variant: string
     }
   }
+  sync?: EventSync
 }
 
 export type PromptSource = {
@@ -2827,6 +2849,7 @@ export type EventSessionNextPrompted = {
     sessionID: string
     prompt: Prompt
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextSynthetic = {
@@ -2837,6 +2860,7 @@ export type EventSessionNextSynthetic = {
     sessionID: string
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextShellStarted = {
@@ -2848,6 +2872,7 @@ export type EventSessionNextShellStarted = {
     callID: string
     command: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextShellEnded = {
@@ -2859,6 +2884,7 @@ export type EventSessionNextShellEnded = {
     callID: string
     output: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextStepStarted = {
@@ -2875,6 +2901,7 @@ export type EventSessionNextStepStarted = {
     }
     snapshot?: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextStepEnded = {
@@ -2896,6 +2923,7 @@ export type EventSessionNextStepEnded = {
     }
     snapshot?: string
   }
+  sync?: EventSync
 }
 
 export type SessionErrorUnknown = {
@@ -2911,6 +2939,7 @@ export type EventSessionNextStepFailed = {
     sessionID: string
     error: SessionErrorUnknown
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextTextStarted = {
@@ -2920,6 +2949,7 @@ export type EventSessionNextTextStarted = {
     timestamp: number
     sessionID: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextTextDelta = {
@@ -2930,6 +2960,7 @@ export type EventSessionNextTextDelta = {
     sessionID: string
     delta: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextTextEnded = {
@@ -2940,6 +2971,7 @@ export type EventSessionNextTextEnded = {
     sessionID: string
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextReasoningStarted = {
@@ -2950,6 +2982,7 @@ export type EventSessionNextReasoningStarted = {
     sessionID: string
     reasoningID: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextReasoningDelta = {
@@ -2961,6 +2994,7 @@ export type EventSessionNextReasoningDelta = {
     reasoningID: string
     delta: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextReasoningEnded = {
@@ -2972,6 +3006,7 @@ export type EventSessionNextReasoningEnded = {
     reasoningID: string
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolInputStarted = {
@@ -2983,6 +3018,7 @@ export type EventSessionNextToolInputStarted = {
     callID: string
     name: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolInputDelta = {
@@ -2994,6 +3030,7 @@ export type EventSessionNextToolInputDelta = {
     callID: string
     delta: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolInputEnded = {
@@ -3005,6 +3042,7 @@ export type EventSessionNextToolInputEnded = {
     callID: string
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolCalled = {
@@ -3025,6 +3063,7 @@ export type EventSessionNextToolCalled = {
       }
     }
   }
+  sync?: EventSync
 }
 
 export type ToolTextContent = {
@@ -3051,6 +3090,7 @@ export type EventSessionNextToolProgress = {
     }
     content: Array<ToolTextContent | ToolFileContent>
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolSuccess = {
@@ -3071,6 +3111,7 @@ export type EventSessionNextToolSuccess = {
       }
     }
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextToolFailed = {
@@ -3088,6 +3129,7 @@ export type EventSessionNextToolFailed = {
       }
     }
   }
+  sync?: EventSync
 }
 
 export type SessionNextRetryError = {
@@ -3112,6 +3154,7 @@ export type EventSessionNextRetried = {
     attempt: number
     error: SessionNextRetryError
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextCompactionStarted = {
@@ -3122,6 +3165,7 @@ export type EventSessionNextCompactionStarted = {
     sessionID: string
     reason: "auto" | "manual"
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextCompactionDelta = {
@@ -3132,6 +3176,7 @@ export type EventSessionNextCompactionDelta = {
     sessionID: string
     text: string
   }
+  sync?: EventSync
 }
 
 export type EventSessionNextCompactionEnded = {
@@ -3143,6 +3188,7 @@ export type EventSessionNextCompactionEnded = {
     text: string
     include?: string
   }
+  sync?: EventSync
 }
 
 export type ModelV2Info = {
@@ -3249,6 +3295,7 @@ export type EventCatalogModelUpdated = {
   properties: {
     model: ModelV2Info
   }
+  sync?: EventSync
 }
 
 export type SessionInfo = {
@@ -3553,6 +3600,41 @@ export type ProviderV2Info = {
   }
 }
 
+export type EventTuiPromptAppend1 = {
+  id: string
+  type: "tui.prompt.append"
+  properties: {
+    text: string
+  }
+  sync?: EventSync
+}
+
+export type EventTuiCommandExecute1 = {
+  id: string
+  type: "tui.command.execute"
+  properties: {
+    command:
+      | "session.list"
+      | "session.new"
+      | "session.share"
+      | "session.interrupt"
+      | "session.compact"
+      | "session.page.up"
+      | "session.page.down"
+      | "session.line.up"
+      | "session.line.down"
+      | "session.half.page.up"
+      | "session.half.page.down"
+      | "session.first"
+      | "session.last"
+      | "prompt.clear"
+      | "prompt.submit"
+      | "agent.cycle"
+      | string
+  }
+  sync?: EventSync
+}
+
 export type EventTuiToastShow1 = {
   id: string
   type: "tui.toast.show"
@@ -3562,6 +3644,19 @@ export type EventTuiToastShow1 = {
     variant: "info" | "success" | "warning" | "error"
     duration?: number
   }
+  sync?: EventSync
+}
+
+export type EventTuiSessionSelect1 = {
+  id: string
+  type: "tui.session.select"
+  properties: {
+    /**
+     * Session ID to navigate to
+     */
+    sessionID: string
+  }
+  sync?: EventSync
 }
 
 export type ModelV2Info1 = {

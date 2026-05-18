@@ -428,11 +428,22 @@ export const layer = Layer.effect(
           yield* parseSSE(stream, (evt) =>
             Effect.gen(function* () {
               if (!evt || typeof evt !== "object" || !("payload" in evt)) return
-              const payload = evt.payload as { type?: string; syncEvent?: SyncEvent.SerializedEvent }
+              const payload = evt.payload as {
+                id?: string
+                type?: string
+                sync?: { name: string; seq: number; aggregateID: string; data: unknown }
+              }
               if (payload.type === "server.heartbeat") return
 
-              if (payload.type === "sync" && payload.syncEvent) {
-                const failed = yield* sync.replay(payload.syncEvent).pipe(
+              if (payload.sync) {
+                const serialized: SyncEvent.SerializedEvent = {
+                  id: payload.id ?? "",
+                  type: payload.sync.name,
+                  seq: payload.sync.seq,
+                  aggregateID: payload.sync.aggregateID,
+                  data: payload.sync.data as never,
+                }
+                const failed = yield* sync.replay(serialized).pipe(
                   Effect.as(false),
                   Effect.catchCause((error) =>
                     Effect.sync(() => {

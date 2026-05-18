@@ -154,10 +154,6 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
               resetHeartbeat()
               streamErrorLogged = false
               const directory = event.directory ?? "global"
-              if (event.payload.type === "sync") {
-                continue
-              }
-
               const payload = event.payload as Event
 
               const k = key(directory, payload)

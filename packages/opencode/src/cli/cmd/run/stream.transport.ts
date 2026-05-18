@@ -170,12 +170,7 @@ function globalPayloadEvent(value: unknown): Event | undefined {
     return undefined
   }
 
-  const payload = value.payload
-  if (payload.type === "sync") {
-    return undefined
-  }
-
-  return isEvent(payload) ? payload : undefined
+  return isEvent(value.payload) ? value.payload : undefined
 }
 
 function isMatchingDisposeEvent(value: unknown, directory: string | undefined): boolean {

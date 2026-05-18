@@ -31,11 +31,21 @@ type State = {
   typed: Map<string, PubSub.PubSub<Payload>>
 }
 
+export type SyncMetadata = {
+  readonly name: string
+  readonly seq: number
+  readonly aggregateID: string
+  readonly data: unknown
+}
+
 export interface Interface {
+  // `sync` carries event-sourcing metadata when the publish originates from
+  // `SyncEvent.run`/`replay`. It rides on the same GlobalBus event as the
+  // projection — one wire event per domain event, with both views inside.
   readonly publish: <D extends BusEvent.Definition>(
     def: D,
     properties: BusProperties<D>,
-    options?: { id?: string },
+    options?: { id?: string; sync?: SyncMetadata },
   ) => Effect.Effect<void>
   // subscribe / subscribeAll are eager: the underlying PubSub subscription is
   // acquired in the caller's Scope at `yield*` time. Any publish after the
@@ -94,7 +104,11 @@ export const layer = Layer.effect(
       })
     }
 
-    function publish<D extends BusEvent.Definition>(def: D, properties: BusProperties<D>, options?: { id?: string }) {
+    function publish<D extends BusEvent.Definition>(
+      def: D,
+      properties: BusProperties<D>,
+      options?: { id?: string; sync?: SyncMetadata },
+    ) {
       return Effect.gen(function* () {
         const s = yield* InstanceState.get(state)
         const payload: Payload = { id: options?.id ?? createID(), type: def.type, properties }
@@ -112,7 +126,7 @@ export const layer = Layer.effect(
           directory: dir,
           project: context.project.id,
           workspace,
-          payload,
+          payload: options?.sync ? { ...payload, sync: options.sync } : payload,
         })
       })
     }
