@@ -791,7 +791,7 @@ function createLayer(input: StreamInput) {
                   event.type === "message.part.updated" &&
                   event.properties.part.sessionID === input.sessionID &&
                   event.properties.part.type === "tool" &&
-                  event.properties.part.tool === "question" &&
+                  (event.properties.part.tool === "question" || event.properties.part.tool === "plan_exit") &&
                   event.properties.part.state.status === "running"
                 ) {
                   yield* recoverQuestion(event.properties.part).pipe(

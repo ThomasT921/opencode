@@ -845,7 +845,7 @@ describe("run stream transport", () => {
         stream: src.stream,
         questions: async () => {
           questionCalls += 1
-          return ok(questionCalls === 1 ? [other] : [other, request])
+          return ok(questionCalls === 1 ? [other] : [request])
         },
         promptAsync: async () => {
           queueMicrotask(() => {
@@ -908,6 +908,7 @@ describe("run stream transport", () => {
         },
       })
 
+      const count = ui.events.length
       src.push(
         toolUpdated(
           completedTool({
@@ -930,13 +931,126 @@ describe("run stream transport", () => {
       expect(
         await waitFor(() => {
           const item = ui.events.findLast((event) => event.type === "stream.view")
-          return item?.type === "stream.view" && item.view.type === "question" && item.view.request.id === other.id
-            ? item.view
-            : undefined
+          return item?.type === "stream.view" && item.view.type === "prompt" ? item : undefined
+        }),
+      ).toEqual({
+        type: "stream.view",
+        view: { type: "prompt" },
+      })
+
+      expect(
+        ui.events.slice(count).findLast(
+          (event) => event.type === "stream.view" && event.view.type === "question" && event.view.request.id === other.id,
+        ),
+      ).toBeUndefined()
+
+      ctrl.abort()
+      await run
+    } finally {
+      src.close()
+      await transport.close()
+    }
+  })
+
+  test("recovers pending plan_exit questions from question.list when question.asked is missed", async () => {
+    const src = eventFeed()
+    const ui = footer()
+    let questionCalls = 0
+    const request = {
+      id: "question-plan-1",
+      sessionID: "session-1",
+      questions: [
+        {
+          question: "Plan is complete. Start implementing it now?",
+          header: "Build Agent",
+          options: [{ label: "Yes", description: "Switch to build agent and start implementing." }],
+          multiple: false,
+        },
+      ],
+      tool: {
+        messageID: "msg-plan-1",
+        callID: "call-plan-exit-1",
+      },
+    }
+    const transport = await createSessionTransport({
+      sdk: sdk({
+        stream: src.stream,
+        questions: async () => {
+          questionCalls += 1
+          return ok(questionCalls === 1 ? [] : [request])
+        },
+        promptAsync: async () => {
+          queueMicrotask(() => {
+            src.push(busy())
+            src.push(assistant("msg-plan-1"))
+            src.push(
+              toolUpdated(
+                runningTool({
+                  sessionID: "session-1",
+                  messageID: "msg-plan-1",
+                  id: "plan-exit-tool-1",
+                  callID: "call-plan-exit-1",
+                  tool: "plan_exit",
+                  body: {},
+                }),
+              ),
+            )
+          })
+          return ok(undefined)
+        },
+      }),
+      sessionID: "session-1",
+      thinking: true,
+      limits: () => ({}),
+      footer: ui.api,
+    })
+
+    const ctrl = new AbortController()
+
+    try {
+      const run = transport.runPromptTurn({
+        agent: undefined,
+        model: undefined,
+        variant: undefined,
+        prompt: { text: "hello", parts: [] },
+        files: [],
+        includeFiles: false,
+        signal: ctrl.signal,
+      })
+
+      expect(
+        await waitFor(() => {
+          const item = ui.events.findLast((event) => event.type === "stream.view")
+          return item?.type === "stream.view" && item.view.type === "question" ? item.view : undefined
         }),
       ).toEqual({
         type: "question",
-        request: other,
+        request,
+      })
+
+      src.push(
+        toolUpdated(
+          completedTool({
+            sessionID: "session-1",
+            messageID: "msg-plan-1",
+            id: "plan-exit-tool-1",
+            callID: "call-plan-exit-1",
+            tool: "plan_exit",
+            body: {},
+            output: "User approved switching to build agent.",
+            metadata: {},
+          }),
+        ),
+      )
+
+      expect(
+        await waitFor(() => {
+          const item = ui.events.findLast((event) => event.type === "stream.view")
+          return item?.type === "stream.view" && item.view.type === "prompt" ? item : undefined
+        }),
+      ).toEqual({
+        type: "stream.view",
+        view: { type: "prompt" },
       })
 
       ctrl.abort()
