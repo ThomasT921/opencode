@@ -835,7 +835,7 @@ describe("run stream transport", () => {
         callID: "call-question-1",
       },
     }
-    const stale = {
+    const other = {
       ...request,
       id: "question-old",
       tool: { messageID: "msg-old", callID: "call-question-old" },
@@ -845,7 +845,7 @@ describe("run stream transport", () => {
         stream: src.stream,
         questions: async () => {
           questionCalls += 1
-          return ok(questionCalls === 1 ? [stale] : [stale, request])
+          return ok(questionCalls === 1 ? [other] : [other, request])
         },
         promptAsync: async () => {
           queueMicrotask(() => {
@@ -930,11 +930,13 @@ describe("run stream transport", () => {
       expect(
         await waitFor(() => {
           const item = ui.events.findLast((event) => event.type === "stream.view")
-          return item?.type === "stream.view" && item.view.type === "prompt" ? item : undefined
+          return item?.type === "stream.view" && item.view.type === "question" && item.view.request.id === other.id
+            ? item.view
+            : undefined
         }),
       ).toEqual({
-        type: "stream.view",
-        view: { type: "prompt" },
+        type: "question",
+        request: other,
       })
 
       ctrl.abort()

@@ -34,6 +34,14 @@ import path from "path"
 import { useKV } from "./kv"
 import { aggregateFailures } from "./aggregate-failures"
 
+export function questionToolRequestIndex(requests: readonly QuestionRequest[] | undefined, part: Part) {
+  if (part.type !== "tool") return -1
+  if (part.state.status !== "completed" && part.state.status !== "error") return -1
+  return requests?.findIndex(
+    (request) => request.tool?.messageID === part.messageID && request.tool?.callID === part.callID,
+  ) ?? -1
+}
+
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
   init: () => {
@@ -304,23 +312,32 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
         case "message.part.updated": {
-          const parts = store.part[event.properties.part.messageID]
+          const part = event.properties.part
+          const parts = store.part[part.messageID]
           if (!parts) {
-            setStore("part", event.properties.part.messageID, [event.properties.part])
-            break
+            setStore("part", part.messageID, [part])
           }
-          const result = Binary.search(parts, event.properties.part.id, (p) => p.id)
-          if (result.found) {
-            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
-            break
+          if (parts) {
+            const result = Binary.search(parts, part.id, (p) => p.id)
+            if (result.found) setStore("part", part.messageID, result.index, reconcile(part))
+            if (!result.found)
+              setStore(
+                "part",
+                part.messageID,
+                produce((draft) => {
+                  draft.splice(result.index, 0, part)
+                }),
+              )
           }
-          setStore(
-            "part",
-            event.properties.part.messageID,
-            produce((draft) => {
-              draft.splice(result.index, 0, event.properties.part)
-            }),
-          )
+          const index = questionToolRequestIndex(store.question[part.sessionID], part)
+          if (index !== -1)
+            setStore(
+              "question",
+              part.sessionID,
+              produce((draft) => {
+                draft.splice(index, 1)
+              }),
+            )
           break
         }
 

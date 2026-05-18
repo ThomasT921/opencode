@@ -530,16 +530,19 @@ function createLayer(input: StreamInput) {
 
               const matching = questions.filter(matches)
               if (matching.length > 0) {
-                state.data.questions = state.data.questions.filter(matches)
+                const active = new Set(questions.map((request) => request.id))
+                state.data.questions = state.data.questions.filter((request) => active.has(request.id))
                 bootstrapSessionData({
                   data: state.data,
                   messages: [],
                   permissions: [],
-                  questions: matching,
+                  questions,
                 })
-                for (const request of matching) {
+                for (const request of questions) {
                   seedBlocker(request.id)
                 }
+                const priority = Math.min(0, ...state.blockers.values()) - 1
+                for (const request of matching) state.blockers.set(request.id, priority)
                 input.trace?.write("question.recover", {
                   sessionID: input.sessionID,
                   requests: matching.map((request) => request.id),
