@@ -106,6 +106,21 @@ export function FormatError(input: unknown): string | undefined {
     ].join("\n")
   }
 
+  // InvalidConfigError: malformed env-var JSON at a safety boundary
+  if (isTaggedError(input, "InvalidConfigError")) {
+    const source = stringField(input, "source") ?? ""
+    const value = stringField(input, "value") ?? ""
+    const reason = stringField(input, "reason") ?? ""
+    return [
+      `Error: ${source} is invalid and cannot be applied.`,
+      `  Value: '${value}'`,
+      `  Reason: ${reason}`,
+      "",
+      `opencode will not start with a malformed ${source}. Set ${source}`,
+      `correctly or unset it to use defaults.`,
+    ].join("\n")
+  }
+
   // UICancelledError: user cancelled an interactive CLI prompt
   if (isTaggedError(input, "UICancelledError") || NamedError.hasName(input, "UICancelledError")) {
     return ""

@@ -14,6 +14,7 @@ import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/instal
 import { existsSync } from "fs"
 import { Account } from "@/account/account"
 import { isRecord } from "@/util/record"
+import { requireJsonConfig } from "@/util/json"
 import type { ConsoleState } from "./console-state"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { InstanceState } from "@/effect/instance-state"
@@ -703,7 +704,8 @@ export const layer = Layer.effect(
         }
 
         if (Flag.OPENCODE_PERMISSION) {
-          result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+          const decoded = requireJsonConfig(Flag.OPENCODE_PERMISSION, ConfigPermission.Info, "OPENCODE_PERMISSION")
+          result.permission = mergeDeep(result.permission ?? {}, decoded)
         }
 
         if (result.tools) {

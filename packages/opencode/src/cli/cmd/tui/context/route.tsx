@@ -1,6 +1,8 @@
 import { createStore, reconcile } from "solid-js/store"
+import { Option, Schema } from "effect"
 import { createSimpleContext } from "./helper"
 import type { PromptInfo } from "../component/prompt/history"
+import { tryJsonConfig } from "@/util/json"
 
 export type HomeRoute = {
   type: "home"
@@ -21,17 +23,25 @@ export type PluginRoute = {
 
 export type Route = HomeRoute | SessionRoute | PluginRoute
 
+const HOME_ROUTE: Route = { type: "home" }
+
+// Schema covers only the env-fed shape — `prompt` is set programmatically and
+// not expected from OPENCODE_ROUTE, so we keep it out of validation.
+export const RouteSchema = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("home") }),
+  Schema.Struct({ type: Schema.Literal("session"), sessionID: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("plugin"),
+    id: Schema.String,
+    data: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  }),
+])
+
 export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
   name: "Route",
   init: (props: { initialRoute?: Route }) => {
-    const [store, setStore] = createStore<Route>(
-      props.initialRoute ??
-        (process.env["OPENCODE_ROUTE"]
-          ? JSON.parse(process.env["OPENCODE_ROUTE"])
-          : {
-              type: "home",
-            }),
-    )
+    const fromEnv = tryJsonConfig(process.env["OPENCODE_ROUTE"], RouteSchema, "OPENCODE_ROUTE")
+    const [store, setStore] = createStore<Route>(props.initialRoute ?? Option.getOrElse(fromEnv, () => HOME_ROUTE))
 
     return {
       get data() {
