@@ -43,14 +43,11 @@ type Services = {
   registry: ToolRegistry.Interface
 }
 
-export const resolvePromptParts = Effect.fn("SessionPromptParts.resolvePromptParts")(function* (
-  template: string,
-  services: Services,
-) {
+export const fromTemplate = Effect.fn("PromptParts.fromTemplate")(function* (template: string, services: Services) {
   return yield* resolveTemplateParts(template, services)
 })
 
-export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageParts")(function* (
+export const fromPrompt = Effect.fn("PromptParts.fromPrompt")(function* (
   input: {
     prompt: PromptInput
     info: MessageV2.User
@@ -88,8 +85,8 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
     })
   })
 
-  const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
-    "SessionPromptParts.resolveUserPart",
+  const fromPart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
+    "PromptParts.fromPart",
   )(function* (part) {
     if (part.type === "file") {
       if (part.source?.type === "resource") {
@@ -369,7 +366,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
     return [{ ...part, messageID: input.info.id, sessionID: input.prompt.sessionID }]
   })
 
-  const resolvedParts = yield* Effect.forEach(input.prompt.parts, resolvePart, { concurrency: "unbounded" }).pipe(
+  const resolvedParts = yield* Effect.forEach(input.prompt.parts, fromPart, { concurrency: "unbounded" }).pipe(
     Effect.map((x) => x.flat().map(assign)),
   )
 
@@ -593,4 +590,4 @@ function nextPrompt(parts: MessageV2.Part[]) {
   )
 }
 
-export * as SessionPromptParts from "./parts"
+export * as PromptParts from "./parts"

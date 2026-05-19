@@ -54,7 +54,7 @@ import { SessionTable } from "./session.sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
-import { SessionPromptParts } from "./prompt/parts"
+import { PromptParts } from "./prompt/parts"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -118,7 +118,7 @@ export const layer = Layer.effect(
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
-        resolvePromptParts: (template: string) => SessionPromptParts.resolvePromptParts(template, services),
+        resolvePromptParts: (template: string) => PromptParts.fromTemplate(template, services),
         prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
         loop: (input: LoopInput) => loop(input),
       } satisfies TaskPromptOps
@@ -649,7 +649,7 @@ export const layer = Layer.effect(
       }
 
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
-      const resolved = yield* SessionPromptParts.resolveMessageParts({ prompt: input, info, agent: ag }, services)
+      const resolved = yield* PromptParts.fromPrompt({ prompt: input, info, agent: ag }, services)
       yield* sessions.updateMessage(info)
       for (const part of resolved.parts) yield* sessions.updatePart(part)
       // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
@@ -1038,7 +1038,7 @@ export const layer = Layer.effect(
         throw error
       }
 
-      const templateParts = yield* SessionPromptParts.resolvePromptParts(template, services)
+      const templateParts = yield* PromptParts.fromTemplate(template, services)
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
       const parts = isSubtask
         ? [
@@ -1089,7 +1089,7 @@ export const layer = Layer.effect(
       loop,
       shell,
       command,
-      resolvePromptParts: (template) => SessionPromptParts.resolvePromptParts(template, services),
+      resolvePromptParts: (template) => PromptParts.fromTemplate(template, services),
     })
   }),
 )
