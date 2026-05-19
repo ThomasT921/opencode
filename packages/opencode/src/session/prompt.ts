@@ -114,11 +114,11 @@ export const layer = Layer.effect(
     const references = yield* Reference.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
-    const promptPartServices = { agents, bus, fsys, image, lsp, mcp, plugin, provider, references, registry }
+    const services = { agents, bus, fsys, image, lsp, mcp, plugin, provider, references, registry }
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
-        resolvePromptParts: (template: string) => SessionPromptParts.resolvePromptParts(template, promptPartServices),
+        resolvePromptParts: (template: string) => SessionPromptParts.resolvePromptParts(template, services),
         prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
         loop: (input: LoopInput) => loop(input),
       } satisfies TaskPromptOps
@@ -649,7 +649,7 @@ export const layer = Layer.effect(
       }
 
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
-      const resolved = yield* SessionPromptParts.resolveMessageParts({ input, info, agent: ag }, promptPartServices)
+      const resolved = yield* SessionPromptParts.resolveMessageParts({ prompt: input, info, agent: ag }, services)
       yield* sessions.updateMessage(info)
       for (const part of resolved.parts) yield* sessions.updatePart(part)
       // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
@@ -658,14 +658,14 @@ export const layer = Layer.effect(
           sessionID: input.sessionID,
           timestamp: DateTime.makeUnsafe(info.time.created),
           prompt: {
-            text: resolved.prompt.text.join("\n"),
-            files: resolved.prompt.files,
-            agents: resolved.prompt.agents,
-            references: resolved.prompt.references,
+            text: resolved.nextPrompt.text.join("\n"),
+            files: resolved.nextPrompt.files,
+            agents: resolved.nextPrompt.agents,
+            references: resolved.nextPrompt.references,
           },
         })
       }
-      for (const text of resolved.prompt.synthetic) {
+      for (const text of resolved.nextPrompt.synthetic) {
         // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
         if (flags.experimentalEventSystem) {
           yield* events.publish(SessionEvent.Synthetic, {
@@ -1038,7 +1038,7 @@ export const layer = Layer.effect(
         throw error
       }
 
-      const templateParts = yield* SessionPromptParts.resolvePromptParts(template, promptPartServices)
+      const templateParts = yield* SessionPromptParts.resolvePromptParts(template, services)
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
       const parts = isSubtask
         ? [
@@ -1089,7 +1089,7 @@ export const layer = Layer.effect(
       loop,
       shell,
       command,
-      resolvePromptParts: (template) => SessionPromptParts.resolvePromptParts(template, promptPartServices),
+      resolvePromptParts: (template) => SessionPromptParts.resolvePromptParts(template, services),
     })
   }),
 )

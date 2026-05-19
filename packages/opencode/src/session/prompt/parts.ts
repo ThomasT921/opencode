@@ -30,44 +30,33 @@ const log = Log.create({ service: "session.prompt.parts" })
 const decodeMessageInfo = Schema.decodeUnknownExit(MessageV2.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(MessageV2.Part)
 
-export type ResolvedPrompt = {
-  text: string[]
-  files: FileAttachment[]
-  agents: AgentAttachment[]
-  references: ReferenceAttachment[]
-  synthetic: string[]
-}
-
-type ResolvePromptPartsServices = {
+type Services = {
   agents: Agent.Interface
-  fsys: AppFileSystem.Interface
-  references: Reference.Interface
-}
-
-type ResolveMessagePartsServices = ResolvePromptPartsServices & {
   bus: Bus.Interface
+  fsys: AppFileSystem.Interface
   image: Image.Interface
   lsp: LSP.Interface
   mcp: MCP.Interface
   plugin: Plugin.Interface
   provider: Provider.Interface
+  references: Reference.Interface
   registry: ToolRegistry.Interface
 }
 
 export const resolvePromptParts = Effect.fn("SessionPromptParts.resolvePromptParts")(function* (
   template: string,
-  services: ResolvePromptPartsServices,
+  services: Services,
 ) {
   return yield* resolveTemplateParts(template, services)
 })
 
 export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageParts")(function* (
   input: {
-    input: PromptInput
+    prompt: PromptInput
     info: MessageV2.User
     agent: Agent.Info
   },
-  services: ResolveMessagePartsServices,
+  services: Services,
 ) {
   type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
   const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
@@ -109,7 +98,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
         const pieces: Draft<MessageV2.Part>[] = [
           {
             messageID: input.info.id,
-            sessionID: input.input.sessionID,
+            sessionID: input.prompt.sessionID,
             type: "text",
             synthetic: true,
             text: `Reading MCP resource: ${part.filename} (${uri})`,
@@ -124,7 +113,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             if ("text" in c && c.text) {
               pieces.push({
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: c.text,
@@ -133,21 +122,21 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
               const mime = "mimeType" in c ? c.mimeType : part.mime
               pieces.push({
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: `[Binary content: ${mime}]`,
               })
             }
           }
-          pieces.push({ ...part, messageID: input.info.id, sessionID: input.input.sessionID })
+          pieces.push({ ...part, messageID: input.info.id, sessionID: input.prompt.sessionID })
         } else {
           const error = Cause.squash(exit.cause)
           log.error("failed to read MCP resource", { error, clientName, uri })
           const message = error instanceof Error ? error.message : String(error)
           pieces.push({
             messageID: input.info.id,
-            sessionID: input.input.sessionID,
+            sessionID: input.prompt.sessionID,
             type: "text",
             synthetic: true,
             text: `Failed to read MCP resource ${part.filename}: ${message}`,
@@ -162,19 +151,19 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             return [
               {
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: `Called the Read tool with the following input: ${JSON.stringify({ filePath: part.filename })}`,
               },
               {
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: decodeDataUrl(part.url),
               },
-              { ...part, messageID: input.info.id, sessionID: input.input.sessionID },
+              { ...part, messageID: input.info.id, sessionID: input.prompt.sessionID },
             ]
           }
           break
@@ -189,7 +178,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             const controller = new AbortController()
             return read
               .execute(args, {
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 abort: controller.signal,
                 agent: input.info.agent,
                 messageID: input.info.id,
@@ -230,11 +219,11 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             const args = { filePath: filepath, offset, limit }
             const pieces: Draft<MessageV2.Part>[] = [
               ...(referenceContext
-                ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.input.sessionID }]
+                ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.prompt.sessionID }]
                 : []),
               {
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
@@ -248,7 +237,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
               const result = exit.value
               pieces.push({
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: result.output,
@@ -260,23 +249,23 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
                     synthetic: true,
                     filename: a.filename ?? part.filename,
                     messageID: input.info.id,
-                    sessionID: input.input.sessionID,
+                    sessionID: input.prompt.sessionID,
                   })),
                 )
               } else {
-                pieces.push({ ...part, mime, messageID: input.info.id, sessionID: input.input.sessionID })
+                pieces.push({ ...part, mime, messageID: input.info.id, sessionID: input.prompt.sessionID })
               }
             } else {
               const error = Cause.squash(exit.cause)
               log.error("failed to read file", { error })
               const message = error instanceof Error ? error.message : String(error)
               yield* services.bus.publish(Session.Event.Error, {
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 error: new NamedError.Unknown({ message }).toObject(),
               })
               pieces.push({
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: `Read tool failed to read ${filepath} with the following error: ${message}`,
@@ -293,16 +282,16 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
               log.error("failed to read directory", { error })
               const message = error instanceof Error ? error.message : String(error)
               yield* services.bus.publish(Session.Event.Error, {
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 error: new NamedError.Unknown({ message }).toObject(),
               })
               return [
                 ...(referenceContext
-                  ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.input.sessionID }]
+                  ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.prompt.sessionID }]
                   : []),
                 {
                   messageID: input.info.id,
-                  sessionID: input.input.sessionID,
+                  sessionID: input.prompt.sessionID,
                   type: "text",
                   synthetic: true,
                   text: `Read tool failed to read ${filepath} with the following error: ${message}`,
@@ -311,33 +300,33 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             }
             return [
               ...(referenceContext
-                ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.input.sessionID }]
+                ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.prompt.sessionID }]
                 : []),
               {
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
               },
               {
                 messageID: input.info.id,
-                sessionID: input.input.sessionID,
+                sessionID: input.prompt.sessionID,
                 type: "text",
                 synthetic: true,
                 text: exit.value.output,
               },
-              { ...part, mime, messageID: input.info.id, sessionID: input.input.sessionID },
+              { ...part, mime, messageID: input.info.id, sessionID: input.prompt.sessionID },
             ]
           }
 
           return [
             ...(referenceContext
-              ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.input.sessionID }]
+              ? [{ ...referenceContext, messageID: input.info.id, sessionID: input.prompt.sessionID }]
               : []),
             {
               messageID: input.info.id,
-              sessionID: input.input.sessionID,
+              sessionID: input.prompt.sessionID,
               type: "text",
               synthetic: true,
               text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
@@ -345,7 +334,7 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
             {
               id: part.id,
               messageID: input.info.id,
-              sessionID: input.input.sessionID,
+              sessionID: input.prompt.sessionID,
               type: "file",
               url:
                 `data:${mime};base64,` +
@@ -363,10 +352,10 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
       const perm = Permission.evaluate("task", part.name, input.agent.permission)
       const hint = perm.action === "deny" ? " . Invoked by user; guaranteed to exist." : ""
       return [
-        { ...part, messageID: input.info.id, sessionID: input.input.sessionID },
+        { ...part, messageID: input.info.id, sessionID: input.prompt.sessionID },
         {
           messageID: input.info.id,
-          sessionID: input.input.sessionID,
+          sessionID: input.prompt.sessionID,
           type: "text",
           synthetic: true,
           text:
@@ -377,21 +366,21 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
       ]
     }
 
-    return [{ ...part, messageID: input.info.id, sessionID: input.input.sessionID }]
+    return [{ ...part, messageID: input.info.id, sessionID: input.prompt.sessionID }]
   })
 
-  const resolvedParts = yield* Effect.forEach(input.input.parts, resolvePart, { concurrency: "unbounded" }).pipe(
+  const resolvedParts = yield* Effect.forEach(input.prompt.parts, resolvePart, { concurrency: "unbounded" }).pipe(
     Effect.map((x) => x.flat().map(assign)),
   )
 
   yield* services.plugin.trigger(
     "chat.message",
     {
-      sessionID: input.input.sessionID,
-      agent: input.input.agent,
-      model: input.input.model,
-      messageID: input.input.messageID,
-      variant: input.input.variant,
+      sessionID: input.prompt.sessionID,
+      agent: input.prompt.agent,
+      model: input.prompt.model,
+      messageID: input.prompt.messageID,
+      variant: input.prompt.variant,
     },
     { message: input.info, parts: resolvedParts },
   )
@@ -408,10 +397,10 @@ export const resolveMessageParts = Effect.fn("SessionPromptParts.resolveMessageP
   )
 
   validate(input.info, parts)
-  return { parts, prompt: promptPayload(parts) }
+  return { parts, nextPrompt: nextPrompt(parts) }
 })
 
-function resolveTemplateParts(template: string, services: ResolvePromptPartsServices) {
+function resolveTemplateParts(template: string, services: Services) {
   return Effect.gen(function* () {
     const ctx = yield* InstanceState.context
     const parts: Types.DeepMutable<PromptInput["parts"]> = [{ type: "text", text: template }]
@@ -535,7 +524,7 @@ function validate(info: MessageV2.User, parts: MessageV2.Part[]) {
   })
 }
 
-function promptPayload(parts: MessageV2.Part[]): ResolvedPrompt {
+function nextPrompt(parts: MessageV2.Part[]) {
   return parts.reduce(
     (result, part) => {
       if (part.type === "text") {
