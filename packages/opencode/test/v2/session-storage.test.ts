@@ -12,9 +12,8 @@ import { SessionMessage } from "@opencode-ai/core/session-message"
 import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { eq, or } from "@/storage/db"
 import { DateTime, Effect, Layer, Schema } from "effect"
-import fs from "fs/promises"
-import os from "os"
 import path from "path"
+import { tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const projectID = ProjectID.make("project-session-storage")
@@ -56,7 +55,7 @@ function sessionStorageContract<R, E>(name: string, layer: Layer.Layer<SessionSt
     yield* seed.project
   })
 
-  it.effect("gets and lists sessions with filters and cursors", () =>
+  it.effect(`${name}: gets and lists sessions with filters and cursors`, () =>
     Effect.gen(function* () {
       yield* setup
       yield* seed.session({
@@ -117,7 +116,7 @@ function sessionStorageContract<R, E>(name: string, layer: Layer.Layer<SessionSt
     }),
   )
 
-  it.effect("lists session messages with cursor direction", () =>
+  it.effect(`${name}: lists session messages with cursor direction`, () =>
     Effect.gen(function* () {
       yield* setup
       yield* seed.session({ id: sessionA, title: "Alpha", path: "apps/api", updated: 1000 })
@@ -141,7 +140,7 @@ function sessionStorageContract<R, E>(name: string, layer: Layer.Layer<SessionSt
     }),
   )
 
-  it.effect("returns context from the latest compaction boundary", () =>
+  it.effect(`${name}: returns context from the latest compaction boundary`, () =>
     Effect.gen(function* () {
       yield* setup
       yield* seed.session({ id: sessionA, title: "Alpha", path: "apps/api", updated: 1000 })
@@ -164,8 +163,8 @@ function sessionStorageContract<R, E>(name: string, layer: Layer.Layer<SessionSt
 const testDatabaseLayer = Layer.unwrap(
   Effect.gen(function* () {
     const dir = yield* Effect.acquireRelease(
-      Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-storage-test-"))),
-      (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
     )
     return Layer.effect(
       StorageDatabase.Service,
@@ -174,7 +173,7 @@ const testDatabaseLayer = Layer.unwrap(
         yield* EffectDrizzleSqlite.migrate(db, { migrationsFolder: path.join(import.meta.dirname, "../../migration") })
         return db
       }),
-    ).pipe(Layer.provide(StorageDatabase.layerForPath(path.join(dir, "storage.db"))))
+    ).pipe(Layer.provide(StorageDatabase.layerForPath(path.join(dir.path, "storage.db"))))
   }),
 )
 
