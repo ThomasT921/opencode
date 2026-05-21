@@ -25,6 +25,8 @@ export const layerForPath = (filename: string) =>
 
 export const layer = Layer.unwrap(
   Effect.sync(() => {
+    // TODO: Extract migration/bootstrap from the legacy Database.Client() so V2 storage
+    // can ensure the schema exists without opening the old global Drizzle connection.
     LegacyDatabase.Client()
     return layerForPath(LegacyDatabase.getPath())
   }),
