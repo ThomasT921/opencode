@@ -49,6 +49,7 @@ export const Model = Schema.Struct({
   reasoning: Schema.Boolean,
   temperature: Schema.Boolean,
   tool_call: Schema.Boolean,
+  tool_choice_required: Schema.optional(Schema.Boolean),
   interleaved: Schema.optional(
     Schema.Union([
       Schema.Literal(true),

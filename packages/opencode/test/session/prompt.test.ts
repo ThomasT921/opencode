@@ -294,6 +294,30 @@ function providerCfg(url: string) {
   }
 }
 
+function toolChoiceRequiredDisabledProviderCfg(url: string) {
+  return {
+    ...providerCfg(url),
+    provider: {
+      test: {
+        ...cfg.provider.test,
+        models: {
+          ...cfg.provider.test.models,
+          "tool-choice-disabled": {
+            ...cfg.provider.test.models["test-model"],
+            id: "tool-choice-disabled",
+            name: "Tool Choice Disabled",
+            tool_choice_required: false,
+          },
+        },
+        options: {
+          ...cfg.provider.test.options,
+          baseURL: url,
+        },
+      },
+    },
+  }
+}
+
 const writeText = Effect.fn("test.writeText")(function* (file: string, text: string) {
   const fs = yield* AppFileSystem.Service
   yield* fs.writeWithDirs(file, text)
@@ -479,6 +503,43 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("structured output uses auto tool choice when model disables required tool choice", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(toolChoiceRequiredDisabledProviderCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* llm.text("plain text")
+
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: { providerID: ProviderID.make("test"), modelID: ModelID.make("tool-choice-disabled") },
+      parts: [{ type: "text", text: "say hello" }],
+      format: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+        },
+      },
+    })
+
+    const inputs = yield* llm.inputs
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0].tool_choice).toBe("auto")
+    expect(inputs[0].tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ function: expect.objectContaining({ name: "StructuredOutput" }) }),
+      ]),
+    )
   }),
 )
 

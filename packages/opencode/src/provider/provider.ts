@@ -867,6 +867,7 @@ const ProviderCapabilities = Schema.Struct({
   reasoning: Schema.Boolean,
   attachment: Schema.Boolean,
   toolcall: Schema.Boolean,
+  toolChoiceRequired: Schema.optional(Schema.Boolean),
   input: ProviderModalities,
   output: ProviderModalities,
   interleaved: ProviderInterleaved,
@@ -1068,6 +1069,7 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       reasoning: model.reasoning ?? false,
       attachment: model.attachment ?? false,
       toolcall: model.tool_call ?? true,
+      toolChoiceRequired: model.tool_choice_required ?? true,
       input: {
         text: model.modalities?.input?.includes("text") ?? false,
         audio: model.modalities?.input?.includes("audio") ?? false,
@@ -1296,6 +1298,7 @@ export const layer = Layer.effect(
                 reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? false,
                 attachment: model.attachment ?? existingModel?.capabilities.attachment ?? false,
                 toolcall: model.tool_call ?? existingModel?.capabilities.toolcall ?? true,
+                toolChoiceRequired: model.tool_choice_required ?? existingModel?.capabilities.toolChoiceRequired ?? true,
                 input: {
                   text: model.modalities?.input?.includes("text") ?? existingModel?.capabilities.input.text ?? true,
                   audio: model.modalities?.input?.includes("audio") ?? existingModel?.capabilities.input.audio ?? false,

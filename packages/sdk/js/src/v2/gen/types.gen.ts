@@ -1049,6 +1049,7 @@ export type ProviderConfig = {
       reasoning?: boolean
       temperature?: boolean
       tool_call?: boolean
+      tool_choice_required?: boolean
       interleaved?:
         | true
         | {
@@ -1313,6 +1314,7 @@ export type Model = {
     reasoning: boolean
     attachment: boolean
     toolcall: boolean
+    toolChoiceRequired?: boolean
     input: {
       text: boolean
       audio: boolean

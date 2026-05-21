@@ -58320,6 +58320,7 @@
         "attachment": false,
         "reasoning": true,
         "tool_call": true,
+        "tool_choice_required": false,
         "interleaved": {
           "field": "reasoning_content"
         },

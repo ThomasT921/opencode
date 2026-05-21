@@ -1044,6 +1044,7 @@ export type ProviderConfig = {
       reasoning?: boolean
       temperature?: boolean
       tool_call?: boolean
+      tool_choice_required?: boolean
       cost?: {
         input: number
         output: number

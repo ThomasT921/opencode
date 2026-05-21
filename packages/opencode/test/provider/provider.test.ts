@@ -757,6 +757,7 @@ test("model inherits properties from existing database model", async () => {
       const model = providers[ProviderID.anthropic].models["claude-sonnet-4-20250514"]
       expect(model.name).toBe("Custom Name for Sonnet")
       expect(model.capabilities.toolcall).toBe(true)
+      expect(model.capabilities.toolChoiceRequired).toBe(true)
       expect(model.capabilities.attachment).toBe(true)
       expect(model.limit.context).toBeGreaterThan(0)
     },
@@ -1372,6 +1373,44 @@ test("model defaults tool_call to true when not specified", async () => {
     fn: async (ctx) => {
       const providers = await list(ctx)
       expect(providers[ProviderID.make("default-tools")].models["model"].capabilities.toolcall).toBe(true)
+    },
+  })
+})
+
+test("model can disable required tool_choice separately from tool_call", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          provider: {
+            "tool-choice": {
+              name: "Tool Choice Provider",
+              npm: "@ai-sdk/openai-compatible",
+              env: [],
+              models: {
+                model: {
+                  name: "Model",
+                  tool_call: true,
+                  tool_choice_required: false,
+                  limit: { context: 4000, output: 1000 },
+                },
+              },
+              options: { apiKey: "test" },
+            },
+          },
+        }),
+      )
+    },
+  })
+  await withTestInstance({
+    directory: tmp.path,
+    fn: async (ctx) => {
+      const providers = await list(ctx)
+      const model = providers[ProviderID.make("tool-choice")].models.model
+      expect(model.capabilities.toolcall).toBe(true)
+      expect(model.capabilities.toolChoiceRequired).toBe(false)
     },
   })
 })
@@ -2018,6 +2057,7 @@ test("models.dev normalization fills required response fields", () => {
   expect(model.capabilities.reasoning).toBe(false)
   expect(model.capabilities.attachment).toBe(false)
   expect(model.capabilities.toolcall).toBe(true)
+  expect(model.capabilities.toolChoiceRequired).toBe(true)
   expect(model.release_date).toBe("")
 })
 
