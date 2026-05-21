@@ -118,6 +118,11 @@ interface TokenResponse {
   expires_in?: number
 }
 
+interface CodexAuthPluginOptions {
+  issuer?: string
+  codexApiEndpoint?: string
+}
+
 async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
   const response = await fetch(`${ISSUER}/oauth/token`, {
     method: "POST",
@@ -136,8 +141,8 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
   return response.json()
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
+async function refreshAccessToken(refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
+  const response = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -364,7 +369,10 @@ function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResp
   })
 }
 
-export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
+export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPluginOptions = {}): Promise<Hooks> {
+  const issuer = options.issuer ?? ISSUER
+  const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
+
   return {
     provider: {
       id: "openai",
@@ -438,7 +446,7 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
             if (!currentAuth.access || currentAuth.expires < Date.now()) {
               if (!refreshPromise) {
                 log.info("refreshing codex access token")
-                refreshPromise = refreshAccessToken(currentAuth.refresh)
+                refreshPromise = refreshAccessToken(currentAuth.refresh, issuer)
                   .then(async (tokens) => {
                     const accountId = extractAccountId(tokens) || authWithAccount.accountId
                     await input.client.auth.set({
@@ -497,7 +505,7 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
                 : new URL(typeof requestInput === "string" ? requestInput : requestInput.url)
             const url =
               parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions")
-                ? new URL(CODEX_API_ENDPOINT)
+                ? new URL(codexApiEndpoint)
                 : parsed
 
             return fetch(url, {

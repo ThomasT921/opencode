@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import {
   CodexAuthPlugin,
   parseJwtClaims,
@@ -6,12 +6,6 @@ import {
   extractAccountId,
   type IdTokenClaims,
 } from "../../src/plugin/codex"
-
-const originalFetch = globalThis.fetch
-
-afterEach(() => {
-  globalThis.fetch = originalFetch
-})
 
 function createTestJwt(payload: object): string {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")
@@ -135,68 +129,101 @@ describe("plugin.codex", () => {
       access: "",
       expires: 0,
     }
-    const authUpdates: unknown[] = []
+    const authUpdates: Array<{
+      body: { refresh: string; access: string; expires: number; accountId?: string }
+    }> = []
     let resolveRefresh: (() => void) | undefined
     const refreshReady = new Promise<void>((resolve) => {
       resolveRefresh = resolve
     })
     let refreshRequests = 0
+    const apiRequests: { authorization: string | null; accountId: string | null }[] = []
 
-    globalThis.fetch = mock(async (request: RequestInfo | URL) => {
-      const url = request instanceof URL ? request.href : typeof request === "string" ? request : request.url
-      if (url === "https://auth.openai.com/oauth/token") {
-        refreshRequests += 1
-        await refreshReady
-        return new Response(
-          JSON.stringify({
+    using server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/oauth/token") {
+          expect(await request.text()).toContain("refresh_token=refresh-old")
+          refreshRequests += 1
+          await refreshReady
+          return Response.json({
             id_token: createTestJwt({ chatgpt_account_id: "acc-123" }),
             access_token: "access-new",
             refresh_token: "refresh-new",
             expires_in: 3600,
-          }),
-          { status: 200 },
-        )
-      }
+          })
+        }
 
-      return new Response("{}", { status: 200 })
-    }) as unknown as typeof fetch
+        if (url.pathname === "/backend-api/codex/responses") {
+          apiRequests.push({
+            authorization: request.headers.get("authorization"),
+            accountId: request.headers.get("ChatGPT-Account-Id"),
+          })
+          return new Response("{}", { status: 200 })
+        }
 
-    const hooks = await CodexAuthPlugin({
-      client: {
-        auth: {
-          async set(input: { body: { refresh: string; access: string; expires: number } }) {
-            authUpdates.push(input)
-            auth = {
-              type: "oauth",
-              refresh: input.body.refresh,
-              access: input.body.access,
-              expires: input.body.expires,
-            }
-          },
-        },
-      } as never,
-      project: {} as never,
-      directory: "",
-      worktree: "",
-      experimental_workspace: {
-        register() {},
+        return new Response("unexpected request", { status: 500 })
       },
-      serverUrl: new URL("https://example.com"),
-      $: {} as never,
     })
+
+    const hooks = await CodexAuthPlugin(
+      {
+        client: {
+          auth: {
+            async set(input: { body: { refresh: string; access: string; expires: number; accountId?: string } }) {
+              authUpdates.push(input)
+              auth = {
+                type: "oauth",
+                refresh: input.body.refresh,
+                access: input.body.access,
+                expires: input.body.expires,
+                ...(input.body.accountId && { accountId: input.body.accountId }),
+              }
+            },
+          },
+        } as never,
+        project: {} as never,
+        directory: "",
+        worktree: "",
+        experimental_workspace: {
+          register() {},
+        },
+        serverUrl: new URL("https://example.com"),
+        $: {} as never,
+      },
+      {
+        issuer: server.url.origin,
+        codexApiEndpoint: new URL("/backend-api/codex/responses", server.url).toString(),
+      },
+    )
     const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
 
     const first = loaded.fetch!("https://api.openai.com/v1/responses")
     const second = loaded.fetch!("https://api.openai.com/v1/responses")
 
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(refreshRequests).toBe(1)
+    await waitFor(() => refreshRequests === 1)
+    expect(apiRequests).toHaveLength(0)
 
     resolveRefresh!()
     await Promise.all([first, second])
 
     expect(refreshRequests).toBe(1)
     expect(authUpdates).toHaveLength(1)
+    expect(authUpdates[0]?.body.refresh).toBe("refresh-new")
+    expect(authUpdates[0]?.body.access).toBe("access-new")
+    expect(authUpdates[0]?.body.accountId).toBe("acc-123")
+    expect(apiRequests).toEqual([
+      { authorization: "Bearer access-new", accountId: "acc-123" },
+      { authorization: "Bearer access-new", accountId: "acc-123" },
+    ])
   })
 })
+
+async function waitFor(predicate: () => boolean) {
+  const started = Date.now()
+  while (!predicate()) {
+    if (Date.now() - started > 1_000) throw new Error("timed out waiting for condition")
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+}
