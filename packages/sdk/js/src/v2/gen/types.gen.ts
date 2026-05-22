@@ -1294,15 +1294,11 @@ export type Config = {
   enterprise?: {
     url?: string
   }
-  /**
-   * Configure tool output truncation, or set to false to disable it. When output exceeds either limit, the full text is written to the truncation directory and a preview is returned.
-   */
-  tool_output?:
-    | false
-    | {
-        max_lines?: number
-        max_bytes?: number
-      }
+  tool_output?: {
+    truncate?: boolean
+    max_lines?: number
+    max_bytes?: number
+  }
   compaction?: {
     auto?: boolean
     prune?: boolean

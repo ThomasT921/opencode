@@ -361,23 +361,27 @@ You can control when tool output is truncated using the `tool_output` option. Wh
 {
   "$schema": "https://opencode.ai/config.json",
   "tool_output": {
+    "truncate": true,
     "max_lines": 2000,
     "max_bytes": 51200
   }
 }
 ```
 
+- `truncate` - Truncate tool output when it exceeds a configured threshold (default: `true`).
 - `max_lines` - Maximum number of lines before output is truncated (default: `2000`).
 - `max_bytes` - Maximum size in bytes before output is truncated (default: `51200`).
 
 These thresholds apply to output handled by OpenCode's shared truncation layer, including MCP and plugin tool output. Individual tools that page or cap their own results can have separate limits.
 
-To disable shared tool output truncation, set `tool_output` to `false`:
+To disable shared tool output truncation, set `truncate` to `false`:
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
-  "tool_output": false
+  "tool_output": {
+    "truncate": false
+  }
 }
 ```
 

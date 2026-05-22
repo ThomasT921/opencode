@@ -162,7 +162,7 @@ describe("Truncate", () => {
         }),
       )
 
-      const disabledIt = configuredIt({ tool_output: false })
+      const disabledIt = configuredIt({ tool_output: { truncate: false } })
       disabledIt.live("does not truncate output when disabled", () =>
         Effect.gen(function* () {
           const content = "a".repeat(Truncate.MAX_BYTES + 1)

@@ -78,9 +78,8 @@ export const layer = Layer.effect(
       const configSvc = yield* Effect.serviceOption(Config.Service)
       if (Option.isNone(configSvc)) return { enabled: true, maxLines: MAX_LINES, maxBytes: MAX_BYTES }
       const cfg = yield* configSvc.value.get().pipe(Effect.catch(() => Effect.succeed(undefined)))
-      if (cfg?.tool_output === false) return { enabled: false, maxLines: MAX_LINES, maxBytes: MAX_BYTES }
       return {
-        enabled: true,
+        enabled: cfg?.tool_output?.truncate !== false,
         maxLines: cfg?.tool_output?.max_lines ?? MAX_LINES,
         maxBytes: cfg?.tool_output?.max_bytes ?? MAX_BYTES,
       }

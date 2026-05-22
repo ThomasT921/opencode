@@ -126,7 +126,7 @@ Every field is optional.
     "mcp_timeout": 30000
   },
 
-  "tool_output": false | { "max_lines": 200, "max_bytes": 8192 },
+  "tool_output": { "truncate": false, "max_lines": 200, "max_bytes": 8192 },
 
   "compaction": { "auto": true, "tail_turns": 15 }
 }
@@ -140,7 +140,7 @@ Shape notes worth being explicit about:
 - `plugin` is an array of strings or `[name, options]` tuples, not an object.
 - `mcp[name].command` is an array of strings, never a single string. `type` is required.
 - `permission` is either a string action or an object keyed by tool name.
-- `tool_output: false` disables shared tool output truncation; use an object to override its line and byte thresholds.
+- `tool_output.truncate: false` disables shared tool output truncation; use `max_lines` and `max_bytes` to override its thresholds.
 
 ## Skills
 
