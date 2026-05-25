@@ -202,7 +202,9 @@ export const layer = Layer.effect(
       const info = yield* InstanceState.get(state)
       const pending = info.pending.get(requestID)
       if (pending) return yield* Deferred.await(pending.deferred)
-      return yield* Cache.get(info.completed, requestID)
+      return yield* Cache.get(info.completed, requestID).pipe(
+        Effect.tapError(() => Cache.invalidateWhen(info.completed, requestID, () => true)),
+      )
     })
 
     const ask = Effect.fn("Question.ask")(function* (input: {
