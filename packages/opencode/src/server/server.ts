@@ -1,4 +1,5 @@
 import "./init-projectors"
+import "@/util/warning"
 
 import { NodeHttpServer } from "@effect/platform-node"
 import * as Log from "@opencode-ai/core/util/log"

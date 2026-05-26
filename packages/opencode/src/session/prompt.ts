@@ -1,5 +1,6 @@
 import path from "path"
 import os from "os"
+import "@/util/warning"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import * as Log from "@opencode-ai/core/util/log"
