@@ -35,6 +35,10 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     "/agent": [{ name: "build", mode: "primary" }],
     "/vcs": { branch: "main", default_branch: "main" },
     "/session": config.sessions,
+    "/global/health": {
+      healthy: true,
+      version: "mock",
+    },
   }
 
   await page.route("**/*", async (route) => {
