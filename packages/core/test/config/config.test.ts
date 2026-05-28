@@ -168,8 +168,15 @@ describe("Config", () => {
                 shell: "/bin/bash",
                 model: "anthropic/claude",
                 autoupdate: "notify",
+                share: "disabled",
+                enterprise: { url: "https://share.example.com" },
+                username: "test-user",
                 snapshots: false,
                 watcher: { ignore: ["node_modules/**", "dist/**", ".git"] },
+                formatter: { prettier: { disabled: true }, custom: { command: ["custom-fmt", "$FILE"], extensions: [".foo"] } },
+                lsp: { typescript: { disabled: true }, custom: { command: ["custom-lsp"], extensions: [".foo"] } },
+                attachments: { image: { auto_resize: false, max_width: 1200, max_height: 900, max_base64_bytes: 1048576 } },
+                tool_output: { max_lines: 1000, max_bytes: 32768 },
                 skills: ["./skills", "~/shared-skills", "https://example.com/.well-known/skills/"],
                 instructions: ["CONTRIBUTING.md", ".cursor/rules/*.md", "https://example.com/shared-rules.md"],
                 references: {
@@ -193,8 +200,23 @@ describe("Config", () => {
             expect(documents[0]?.info.shell).toBe("/bin/bash")
             expect(documents[0]?.info.model).toBe("anthropic/claude")
             expect(documents[0]?.info.autoupdate).toBe("notify")
+            expect(documents[0]?.info.share).toBe("disabled")
+            expect(documents[0]?.info.enterprise).toEqual({ url: "https://share.example.com" })
+            expect(documents[0]?.info.username).toBe("test-user")
             expect(documents[0]?.info.snapshots).toBe(false)
             expect(documents[0]?.info.watcher).toEqual({ ignore: ["node_modules/**", "dist/**", ".git"] })
+            expect(documents[0]?.info.formatter).toEqual({
+              prettier: { disabled: true },
+              custom: { command: ["custom-fmt", "$FILE"], extensions: [".foo"] },
+            })
+            expect(documents[0]?.info.lsp).toEqual({
+              typescript: { disabled: true },
+              custom: { command: ["custom-lsp"], extensions: [".foo"] },
+            })
+            expect(documents[0]?.info.attachments).toEqual({
+              image: { auto_resize: false, max_width: 1200, max_height: 900, max_base64_bytes: 1048576 },
+            })
+            expect(documents[0]?.info.tool_output).toEqual({ max_lines: 1000, max_bytes: 32768 })
             expect(documents[0]?.info.skills).toEqual([
               "./skills",
               "~/shared-skills",

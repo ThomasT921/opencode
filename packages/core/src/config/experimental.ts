@@ -8,11 +8,11 @@ import { Policy as PolicyV2 } from "../policy"
 // this union makes it valid in authored config while keeping Policy generic.
 export const PolicyAction = Schema.Union([Catalog.PolicyActions])
 
-export class Policy extends Schema.Class<Policy>("Config.Experimental.Policy")({
+export class Policy extends Schema.Class<Policy>("ConfigV2.Experimental.Policy")({
   ...PolicyV2.Info.fields,
   action: PolicyAction,
 }) {}
 
-export class Experimental extends Schema.Class<Experimental>("Config.Experimental")({
+export class Experimental extends Schema.Class<Experimental>("ConfigV2.Experimental")({
   policies: Policy.pipe(Schema.Array, Schema.optional),
 }) {}

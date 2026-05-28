@@ -8,10 +8,14 @@ import { Global } from "./global"
 import { Location } from "./location"
 import { Policy } from "./policy"
 import { AbsolutePath } from "./schema"
+import { ConfigAttachments } from "./config/attachments"
 import { ConfigExperimental } from "./config/experimental"
+import { ConfigFormatter } from "./config/formatter"
+import { ConfigLSP } from "./config/lsp"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
+import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
@@ -27,11 +31,34 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   autoupdate: Schema.Union([Schema.Boolean, Schema.Literal("notify")]).pipe(Schema.optional).annotate({
     description: "Automatically update or notify when a new version is available",
   }),
+  share: Schema.Literals(["manual", "auto", "disabled"]).pipe(Schema.optional).annotate({
+    description: "Control whether sessions may be shared manually, automatically, or not at all",
+  }),
+  enterprise: Schema.Struct({
+    url: Schema.String.pipe(Schema.optional),
+  }).pipe(Schema.optional).annotate({
+    description: "Enterprise sharing service configuration",
+  }),
+  username: Schema.String.pipe(Schema.optional).annotate({
+    description: "Username displayed in conversations and used for telemetry identity",
+  }),
   snapshots: Schema.Boolean.pipe(Schema.optional).annotate({
     description: "Enable snapshots used for undo and revert behavior",
   }),
   watcher: ConfigWatcher.Info.pipe(Schema.optional).annotate({
     description: "Filesystem watcher configuration",
+  }),
+  formatter: ConfigFormatter.Info.pipe(Schema.optional).annotate({
+    description: "Enable built-in formatters or configure formatter overrides",
+  }),
+  lsp: ConfigLSP.Info.pipe(Schema.optional).annotate({
+    description: "Enable built-in language servers or configure server overrides",
+  }),
+  attachments: ConfigAttachments.Info.pipe(Schema.optional).annotate({
+    description: "Attachment processing configuration",
+  }),
+  tool_output: ConfigToolOutput.Info.pipe(Schema.optional).annotate({
+    description: "Tool output truncation thresholds",
   }),
   skills: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs to discover skills from",

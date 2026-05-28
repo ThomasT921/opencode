@@ -110,10 +110,31 @@ Settings controlling local file observation, snapshots, language tooling, and to
 | ------------- | --------------------------------------- | ------- | ----- |
 | `watcher`     | Ignore patterns for filesystem watching | keep     | Keep `{ ignore?: string[] }`; this configures the filesystem watcher subsystem. |
 | `snapshot`    | Enable filesystem snapshot tracking     | redesign | Rename to plural `snapshots`; controls creation of snapshots used for undo and revert behavior. |
-| `formatter`   | Configure formatters                    | pending |       |
-| `lsp`         | Configure language servers              | pending |       |
-| `attachment`  | Configure attachment/image processing   | pending |       |
-| `tool_output` | Configure tool output truncation limits | pending |       |
+| `formatter`   | Configure formatters                    | keep     | Keep singular `boolean \| Record<string, entry>` shape; it configures built-in enablement and named formatter overrides. |
+| `lsp`         | Configure language servers              | keep     | Keep singular `boolean \| Record<string, entry>` shape; custom servers need commands and file extensions. |
+| `attachment`  | Configure attachment/image processing   | redesign | Rename to plural `attachments`; retain `{ image?: { auto_resize?, max_width?, max_height?, max_base64_bytes? } }` for input normalization limits. |
+| `tool_output` | Configure tool output truncation limits | keep     | Keep `{ max_lines?, max_bytes? }`; both positive thresholds apply to saved-preview truncation behavior. |
+
+`formatter` and `lsp` configure one project tooling subsystem each, so their singular names remain appropriate. `true` enables the built-in registrations, `false` disables them, and a keyed object enables built-ins while applying named overrides or custom registrations. Custom language servers must declare `extensions` so runtime file attachment is deterministic; validation of known built-in server IDs belongs with the eventual v2 LSP integration rather than the aggregate core config schema.
+
+Rename legacy `attachment` to `attachments` in v2. This setting controls processing for the attachment domain and may expand beyond image handling, while singular `attachment` is already used as a model capability flag indicating whether one model accepts attachments.
+
+```jsonc
+{
+  "formatter": {
+    "prettier": { "disabled": true },
+    "project": { "command": ["./scripts/format", "$FILE"], "extensions": [".foo"] },
+  },
+  "lsp": {
+    "typescript": { "disabled": true },
+    "project": { "command": ["project-language-server", "--stdio"], "extensions": [".foo"] },
+  },
+  "attachments": {
+    "image": { "auto_resize": true, "max_width": 2000, "max_height": 2000 },
+  },
+  "tool_output": { "max_lines": 2000, "max_bytes": 51200 },
+}
+```
 
 ## Group 6: Sharing And Identity
 
@@ -121,10 +142,22 @@ Settings affecting sharing behavior or user/account identity rather than model e
 
 | Field        | Current Purpose                                 | Status  | Notes                           |
 | ------------ | ----------------------------------------------- | ------- | ------------------------------- |
-| `share`      | Session sharing behavior                        | pending |                                 |
-| `autoshare`  | Legacy automatic sharing flag                   | pending | Deprecated in favor of `share`. |
-| `enterprise` | Enterprise URL configuration                    | pending |                                 |
-| `username`   | Display username in conversations and telemetry | pending |                                 |
+| `share`      | Session sharing behavior                        | keep   | Keep `"manual" \| "auto" \| "disabled"`; it controls manual sharing permission and automatic sharing of new sessions. |
+| `autoshare`  | Legacy automatic sharing flag                   | remove | Do not port deprecated alias; use `share: "auto"`. |
+| `enterprise` | Enterprise URL configuration                    | keep   | Keep `{ url?: string }`; currently selects the legacy sharing service endpoint when no organization account is active. |
+| `username`   | Display username in conversations and telemetry | keep   | Keep string identity override; runtime may otherwise resolve an operating-system username. |
+
+Retain `share` as the single session-sharing setting. `"manual"` permits explicit sharing, `"auto"` shares newly created top-level sessions, and `"disabled"` prevents sharing. Legacy `autoshare: true` is only an alias for `share: "auto"`, so v2 does not expose it.
+
+Retain `enterprise.url` for legacy enterprise share hosting selection and `username` as a user-facing identity override. These remain separate from server authentication credentials; `username` identifies the user in conversation and telemetry behavior rather than HTTP basic-auth configuration.
+
+```jsonc
+{
+  "share": "disabled",
+  "enterprise": { "url": "https://share.example.com" },
+  "username": "developer",
+}
+```
 
 ## Group 7: Providers And Model Selection
 
