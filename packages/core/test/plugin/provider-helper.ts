@@ -31,7 +31,7 @@ export const npmLayer = Layer.succeed(
 export const catalogLayer = Layer.succeed(
   Catalog.Service,
   Catalog.Service.of({
-    loader: () => Effect.die("unexpected catalog.loader"),
+    transform: () => Effect.die("unexpected catalog.transform"),
     provider: {
       get: () => Effect.die("unexpected provider.get"),
       all: () => Effect.succeed([]),
@@ -42,7 +42,6 @@ export const catalogLayer = Layer.succeed(
       all: () => Effect.succeed([]),
       available: () => Effect.succeed([]),
       default: () => Effect.succeed(Option.none<ModelV2.Info>()),
-      setDefault: () => Effect.die("unexpected model.setDefault"),
       small: () => Effect.succeed(Option.none<ModelV2.Info>()),
     },
   }),

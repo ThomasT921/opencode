@@ -24,8 +24,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode")
           catalog.provider.update(item.id, () => {})
           const paid = model("opencode", "paid", { cost: cost(1) })
@@ -45,8 +45,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode")
           catalog.provider.update(item.id, () => {})
           const free = model("opencode", "free", { cost: cost(0) })
@@ -66,8 +66,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode")
           catalog.provider.update(item.id, () => {})
           const outputOnly = model("opencode", "output-only", { cost: cost(0, 1) })
@@ -87,8 +87,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode")
           catalog.provider.update(item.id, () => {})
           const paid = model("opencode", "paid", { cost: cost(1) })
@@ -108,8 +108,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode", { env: ["CUSTOM_OPENCODE_API_KEY"] })
           catalog.provider.update(item.id, (draft) => {
             draft.env = [...item.env]
@@ -131,8 +131,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode", {
             options: {
               headers: {},
@@ -163,8 +163,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("opencode", { enabled: { via: "account", service: "opencode" } })
           catalog.provider.update(item.id, (draft) => {
             draft.enabled = item.enabled
@@ -186,8 +186,8 @@ describe("OpencodePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const item = provider("openai")
           catalog.provider.update(item.id, () => {})
           const paid = model("openai", "paid", { cost: cost(1) })
@@ -206,8 +206,8 @@ describe("OpencodePlugin", () => {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.opencode
 
-      const load = yield* catalog.loader()
-      yield* load((catalog) => {
+      const transform = yield* catalog.transform()
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("cheap-mini"), (model) => {
           model.capabilities.input = ["text"]

@@ -34,8 +34,8 @@ describe("AzurePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(AzurePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           catalog.provider.update(ProviderV2.ID.azure, (item) => {
             item.endpoint = { type: "aisdk", package: "@ai-sdk/azure" }
           })
@@ -51,8 +51,8 @@ describe("AzurePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(AzurePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const azure = provider("azure", {
             endpoint: { type: "aisdk", package: "@ai-sdk/azure" },
             options: { headers: {}, body: {}, aisdk: { provider: { resourceName: "from-config" }, request: {} } },
@@ -100,8 +100,8 @@ describe("AzurePlugin", () => {
             ),
           })
           yield* plugin.add(AzurePlugin)
-          const load = yield* catalog.loader()
-          yield* load((catalog) => {
+          const transform = yield* catalog.transform()
+          yield* transform((catalog) => {
             catalog.provider.update(ProviderV2.ID.azure, (item) => {
               item.endpoint = { type: "aisdk", package: "@ai-sdk/azure" }
             })
@@ -119,8 +119,8 @@ describe("AzurePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(AzurePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const azure = provider("azure", {
             endpoint: { type: "aisdk", package: "@ai-sdk/azure" },
             options: { headers: {}, body: {}, aisdk: { provider: { resourceName: "" }, request: {} } },
@@ -141,8 +141,8 @@ describe("AzurePlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(AzurePlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) => {
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) => {
           const azure = provider("azure", {
             endpoint: { type: "aisdk", package: "@ai-sdk/azure" },
             options: { headers: {}, body: {}, aisdk: { provider: { resourceName: "   " }, request: {} } },

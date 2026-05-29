@@ -184,8 +184,8 @@ describe("GitLabPlugin", () => {
             ),
           })
           yield* plugin.add(GitLabPlugin)
-          const load = yield* catalog.loader()
-          yield* load((catalog) => catalog.provider.update(ProviderV2.ID.make("gitlab"), () => {}))
+          const transform = yield* catalog.transform()
+          yield* transform((catalog) => catalog.provider.update(ProviderV2.ID.make("gitlab"), () => {}))
           const provider = yield* catalog.provider.get(ProviderV2.ID.make("gitlab"))
           yield* plugin.trigger(
             "aisdk.sdk",
@@ -232,8 +232,8 @@ describe("GitLabPlugin", () => {
             ),
           })
           yield* plugin.add(GitLabPlugin)
-          const load = yield* catalog.loader()
-          yield* load((catalog) => catalog.provider.update(ProviderV2.ID.make("gitlab"), () => {}))
+          const transform = yield* catalog.transform()
+          yield* transform((catalog) => catalog.provider.update(ProviderV2.ID.make("gitlab"), () => {}))
           const provider = yield* catalog.provider.get(ProviderV2.ID.make("gitlab"))
           yield* plugin.trigger(
             "aisdk.sdk",

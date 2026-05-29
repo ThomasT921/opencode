@@ -29,9 +29,9 @@ describe("CatalogV2", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) =>
+      yield* transform((catalog) =>
         catalog.provider.update(providerID, (provider) => {
           provider.endpoint = {
             type: "aisdk",
@@ -55,9 +55,9 @@ describe("CatalogV2", () => {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
       const modelID = ModelV2.ID.make("model")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
           provider.endpoint = {
             type: "aisdk",
@@ -84,9 +84,9 @@ describe("CatalogV2", () => {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
       const modelID = ModelV2.ID.make("model")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
           provider.endpoint = {
             type: "aisdk",
@@ -111,14 +111,14 @@ describe("CatalogV2", () => {
       const plugin = yield* PluginV2.Service
       const providerID = ProviderV2.ID.make("test")
       const seen: unknown[] = []
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
       yield* plugin.add({
         id: PluginV2.ID.make("test"),
         effect: Effect.succeed({
           "catalog.transform": (evt) =>
             Effect.sync(() => {
-              const item = evt.data.find((record) => record.provider.id === providerID)
+              const item = evt.provider.get(providerID)
               if (!item) return
               seen.push(item.provider.endpoint.type)
               if (item?.provider.endpoint.type === "aisdk") seen.push(item.provider.endpoint.url)
@@ -126,7 +126,7 @@ describe("CatalogV2", () => {
             }),
         }),
       })
-      yield* load((catalog) =>
+      yield* transform((catalog) =>
         catalog.provider.update(providerID, (provider) => {
           provider.endpoint = { type: "aisdk", package: "@ai-sdk/openai-compatible" }
           provider.options.aisdk.provider.baseURL = "https://provider.example.com"
@@ -142,9 +142,9 @@ describe("CatalogV2", () => {
       const catalog = yield* Catalog.Service
       const plugin = yield* PluginV2.Service
       const providerID = ProviderV2.ID.make("test")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) =>
+      yield* transform((catalog) =>
         catalog.provider.update(providerID, (provider) => {
           provider.name = "Before"
         }),
@@ -171,9 +171,9 @@ describe("CatalogV2", () => {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
       const modelID = ModelV2.ID.make("model")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
           provider.options.headers.provider = "provider"
           provider.options.headers.shared = "provider"
@@ -201,9 +201,9 @@ describe("CatalogV2", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, (provider) => {
           provider.enabled = { via: "custom", data: {} }
         })
@@ -219,13 +219,44 @@ describe("CatalogV2", () => {
     }),
   )
 
+  it.effect("uses a transform-provided default model until that transform is replaced", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const providerID = ProviderV2.ID.make("test")
+      const old = ModelV2.ID.make("old")
+      const newest = ModelV2.ID.make("new")
+      const transform = yield* catalog.transform()
+
+      const models = (catalog: Catalog.Editor) => {
+        catalog.provider.update(providerID, (provider) => {
+          provider.enabled = { via: "custom", data: {} }
+        })
+        catalog.model.update(providerID, old, (model) => {
+          model.time.released = DateTime.makeUnsafe(1000)
+        })
+        catalog.model.update(providerID, newest, (model) => {
+          model.time.released = DateTime.makeUnsafe(2000)
+        })
+      }
+
+      yield* transform((catalog) => {
+        models(catalog)
+        catalog.model.default.set(providerID, old)
+      })
+      expect(Option.getOrUndefined(yield* catalog.model.default())?.id).toBe(old)
+
+      yield* transform(models)
+      expect(Option.getOrUndefined(yield* catalog.model.default())?.id).toBe(newest)
+    }),
+  )
+
   it.effect("small model prefers small keyword candidates before cost scoring", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const providerID = ProviderV2.ID.make("test")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("cheap-large"), (model) => {
           model.capabilities.input = ["text"]
@@ -250,10 +281,10 @@ describe("CatalogV2", () => {
       const catalog = yield* Catalog.Service
       const policy = yield* Policy.Service
       const providerID = ProviderV2.ID.make("blocked")
-      const load = yield* catalog.loader()
+      const transform = yield* catalog.transform()
 
       yield* policy.load([new Policy.Info({ effect: "deny", action: "provider.use", resource: "blocked" })])
-      yield* load((catalog) => {
+      yield* transform((catalog) => {
         catalog.provider.update(providerID, () => {})
         catalog.model.update(providerID, ModelV2.ID.make("model"), () => {})
       })

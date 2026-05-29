@@ -12,10 +12,10 @@ export const Plugin = PluginV2.define({
   effect: Effect.gen(function* () {
     const catalog = yield* Catalog.Service
     const config = yield* Config.Service
-    const load = yield* catalog.loader()
+    const transform = yield* catalog.transform()
     const files = yield* config.get()
 
-    yield* load((catalog) => {
+    yield* transform((catalog) => {
       for (const file of files) {
         for (const [id, item] of Object.entries(file.info.providers ?? {})) {
           const providerID = ProviderV2.ID.make(id)

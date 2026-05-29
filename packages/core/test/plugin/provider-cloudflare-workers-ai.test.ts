@@ -54,8 +54,8 @@ describe("CloudflareWorkersAIPlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(CloudflareWorkersAIPlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) =>
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) =>
           catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
             provider.endpoint = { type: "aisdk", package: "test-provider" }
           }),
@@ -86,8 +86,8 @@ describe("CloudflareWorkersAIPlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(CloudflareWorkersAIPlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) =>
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) =>
           catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
             provider.endpoint = { type: "aisdk", package: "test-provider", url: "https://proxy.example/v1" }
           }),
@@ -152,8 +152,8 @@ describe("CloudflareWorkersAIPlugin", () => {
             ),
           })
           yield* plugin.add(CloudflareWorkersAIPlugin)
-          const load = yield* catalog.loader()
-          yield* load((catalog) =>
+          const transform = yield* catalog.transform()
+          yield* transform((catalog) =>
             catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
               provider.endpoint = { type: "aisdk", package: "test-provider" }
             }),
@@ -173,8 +173,8 @@ describe("CloudflareWorkersAIPlugin", () => {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(CloudflareWorkersAIPlugin)
-        const load = yield* catalog.loader()
-        yield* load((catalog) =>
+        const transform = yield* catalog.transform()
+        yield* transform((catalog) =>
           catalog.provider.update(ProviderV2.ID.make("cloudflare-workers-ai"), (provider) => {
             provider.endpoint = { type: "aisdk", package: "test-provider" }
             provider.options.aisdk.provider.accountId = "configured-acct"
