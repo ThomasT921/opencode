@@ -109,7 +109,10 @@ const lsp = Layer.succeed(
   }),
 )
 
-const status = SessionStatus.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer))
+const status = SessionStatus.layer.pipe(
+  Layer.provide(Session.defaultLayer),
+  Layer.provideMerge(EventV2Bridge.defaultLayer),
+)
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 

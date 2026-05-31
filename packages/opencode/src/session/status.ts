@@ -4,6 +4,8 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { NotFoundError } from "@/storage/storage"
+import { Session } from "./session"
 
 export const Info = Schema.Union([
   Schema.Struct({
@@ -37,6 +39,7 @@ export const Event = {
     schema: {
       sessionID: SessionID,
       status: Info,
+      parentID: Schema.optional(SessionID),
     },
   }),
   // deprecated
@@ -60,6 +63,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    const sessions = yield* Session.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
@@ -76,7 +80,12 @@ export const layer = Layer.effect(
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
-      yield* events.publish(Event.Status, { sessionID, status })
+      const session = yield* sessions.get(sessionID).pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void))
+      yield* events.publish(Event.Status, {
+        sessionID,
+        status,
+        ...(session?.parentID ? { parentID: session.parentID } : {}),
+      })
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })
         data.delete(sessionID)
@@ -89,6 +98,6 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(EventV2Bridge.defaultLayer))
+export const defaultLayer = layer.pipe(Layer.provide(Session.defaultLayer), Layer.provide(EventV2Bridge.defaultLayer))
 
 export * as SessionStatus from "./status"

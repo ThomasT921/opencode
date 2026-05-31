@@ -153,7 +153,10 @@ const lsp = Layer.succeed(
   }),
 )
 
-const status = SessionStatus.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer))
+const status = SessionStatus.layer.pipe(
+  Layer.provide(Session.defaultLayer),
+  Layer.provideMerge(EventV2Bridge.defaultLayer),
+)
 const run = SessionRunState.layer.pipe(Layer.provide(status))
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 
@@ -863,6 +866,41 @@ it.instance(
       yield* prompt.cancel(chat.id)
       yield* Fiber.await(fiber)
       expect((yield* status.get(chat.id)).type).toBe("idle")
+    }),
+  3_000,
+)
+
+it.instance(
+  "loop status events identify child sessions through cancellation",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const events = yield* EventV2Bridge.Service
+      const statuses: Array<typeof SessionStatus.Event.Status.data.Type> = []
+
+      yield* llm.hang
+
+      const parent = yield* sessions.create({})
+      const child = yield* sessions.create({ parentID: parent.id })
+      yield* user(child.id, "hi")
+
+      const off = yield* events.listen((event) => {
+        if (event.type !== SessionStatus.Event.Status.type) return Effect.void
+        const data = event.data as typeof SessionStatus.Event.Status.data.Type
+        if (data.sessionID === child.id) statuses.push(data)
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
+
+      const fiber = yield* prompt.loop({ sessionID: child.id }).pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* prompt.cancel(child.id)
+      yield* Fiber.await(fiber)
+
+      expect(statuses.some((event) => event.status.type === "idle")).toBe(true)
+      expect(statuses.every((event) => event.parentID === parent.id)).toBe(true)
     }),
   3_000,
 )

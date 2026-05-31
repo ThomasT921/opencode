@@ -171,7 +171,10 @@ const assistant = Effect.fn("TestSession.assistant")(function* (
   return msg
 })
 
-const status = SessionStatus.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer))
+const status = SessionStatus.layer.pipe(
+  Layer.provide(Session.defaultLayer),
+  Layer.provideMerge(EventV2Bridge.defaultLayer),
+)
 const infra = Layer.mergeAll(NodeFileSystem.layer, CrossSpawnSpawner.defaultLayer)
 const deps = Layer.mergeAll(
   Session.defaultLayer,
@@ -588,15 +591,18 @@ it.live("session.processor effect tests publish retry status updates", () =>
         yield* llm.error(503, { error: "boom" })
         yield* llm.text("")
 
-        const chat = yield* session.create({})
+        const root = yield* session.create({})
+        const chat = yield* session.create({ parentID: root.id })
         const parent = yield* user(chat.id, "retry")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const states: number[] = []
+        const states: Array<{ attempt: number; parentID?: SessionID }> = []
         const off = yield* events.listen((evt) => {
           if (evt.type !== SessionStatus.Event.Status.type) return Effect.void
           const data = evt.data as typeof SessionStatus.Event.Status.data.Type
-          if (data.sessionID === chat.id && data.status.type === "retry") states.push(data.status.attempt)
+          if (data.sessionID === chat.id && data.status.type === "retry") {
+            states.push({ attempt: data.status.attempt, parentID: data.parentID })
+          }
           return Effect.void
         })
         const handle = yield* processors.create({
@@ -626,7 +632,7 @@ it.live("session.processor effect tests publish retry status updates", () =>
 
         expect(value).toBe("continue")
         expect(yield* llm.calls).toBe(2)
-        expect(states).toStrictEqual([1])
+        expect(states).toStrictEqual([{ attempt: 1, parentID: root.id }])
       }),
     { config: (url) => providerCfg(url) },
   ),

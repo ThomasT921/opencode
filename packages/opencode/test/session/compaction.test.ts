@@ -269,7 +269,7 @@ function withCompaction(options?: CompactionProcessOptions) {
 
 function compactionProcessLayer(options?: CompactionProcessOptions) {
   const events = EventV2Bridge.defaultLayer
-  const status = SessionStatus.layer.pipe(Layer.provide(events))
+  const status = SessionStatus.layer.pipe(Layer.provide(SessionNs.defaultLayer), Layer.provide(events))
   const processor = options?.llm
     ? SessionProcessorModule.SessionProcessor.layer.pipe(
         Layer.provide(summary),
