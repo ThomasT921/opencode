@@ -1,5 +1,5 @@
 import { createStore } from "solid-js/store"
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
@@ -43,6 +43,21 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     const value = input()
     if (!value) return false
     return store.answers[store.tab]?.includes(value) ?? false
+  })
+
+  let requestID = props.request.id
+  createEffect(() => {
+    const next = props.request.id
+    if (next === requestID) return
+    requestID = next
+    textarea = undefined
+    setStore({
+      tab: 0,
+      answers: [],
+      custom: [],
+      selected: 0,
+      editing: false,
+    })
   })
 
   function submit() {
@@ -95,8 +110,8 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
   }
 
   function selectTab(index: number) {
-    setStore("tab", index)
-    setStore("selected", 0)
+    textarea = undefined
+    setStore({ tab: index, selected: 0, editing: false })
   }
 
   function selectOption() {
