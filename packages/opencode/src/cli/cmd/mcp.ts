@@ -63,7 +63,6 @@ type McpAddArgs = {
   header?: string[]
   global?: boolean
 }
-type McpAddYargs = WithDoubleDash<McpAddArgs> & { _?: Array<string | number> }
 
 function configuredServers(config: Config.Info) {
   return Object.entries(config.mcp ?? {}).filter((entry): entry is [string, McpConfigured] => isMcpConfigured(entry[1]))
@@ -450,7 +449,6 @@ export const McpAddCommand = effectCmd({
   describe: "add an MCP server",
   builder: (yargs) =>
     yargs
-      .parserConfiguration({ "unknown-options-as-args": true })
       .positional("name", {
         describe: "name of the MCP server",
         type: "string",
@@ -492,7 +490,7 @@ Examples:
   opencode mcp add local-env --env FOO=bar -- node server.js
   opencode mcp add sg --header Authorization=token https://sg.example/mcp
   opencode mcp add hugging-face https://huggingface.co/mcp`),
-  handler: Effect.fn("Cli.mcp.add")(function* (input: McpAddArgs) {
+  handler: Effect.fn("Cli.mcp.add")(function* (input: WithDoubleDash<McpAddArgs>) {
     const maybeCtx = yield* InstanceRef
     if (!maybeCtx) return yield* Effect.die("InstanceRef not provided")
     const ctx = maybeCtx
@@ -663,15 +661,8 @@ Examples:
   }),
 })
 
-function mcpAddArgs(input: McpAddArgs) {
-  // For nested variadic commands, yargs puts tokens after `--` in `_` instead of the positional array.
-  const raw = input as McpAddYargs
-  const addIndex = raw._?.lastIndexOf("add") ?? -1
-  return [
-    ...(input.args ?? []),
-    ...(addIndex === -1 || !raw._ ? [] : raw._.slice(addIndex + 1).map(String)),
-    ...(raw["--"] ?? []),
-  ]
+function mcpAddArgs(input: WithDoubleDash<McpAddArgs>) {
+  return [...(input.args ?? []), ...(input["--"] ?? [])]
 }
 
 function parseInlineMcpAdd(
