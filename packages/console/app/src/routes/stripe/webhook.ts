@@ -6,7 +6,7 @@ import { BillingTable, LiteTable, PaymentTable } from "@opencode-ai/console-core
 import { Identifier } from "@opencode-ai/console-core/identifier.js"
 import { centsToMicroCents } from "@opencode-ai/console-core/util/price.js"
 import { Actor } from "@opencode-ai/console-core/actor.js"
-import { Resource } from "@opencode-ai/console-resource"
+import { Resource, waitUntil } from "@opencode-ai/console-resource"
 import { LiteData } from "@opencode-ai/console-core/lite.js"
 import { BlackData } from "@opencode-ai/console-core/black.js"
 import { Referral } from "@opencode-ai/console-core/referral.js"
@@ -372,9 +372,153 @@ export async function POST(input: APIEvent) {
     }
   })()
     .then((message) => {
+      waitUntil(
+        writeStripeEventToLake(body).catch((error) => {
+          console.error("Stripe lake ingest failed", error)
+        }),
+      )
       return Response.json({ message: message ?? "done" }, { status: 200 })
     })
     .catch((error: any) => {
       return Response.json({ message: error.message }, { status: 500 })
     })
+}
+
+async function writeStripeEventToLake(event: Stripe.Event) {
+  const lakeIngest = getLakeIngest()
+  if (!lakeIngest) return
+
+  const response = await fetch(lakeIngest.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${lakeIngest.secret}`,
+    },
+    body: JSON.stringify({ events: [toLakeStripeEvent(event)] }),
+  })
+  if (response.ok) return
+  throw new Error(`Lake ingest rejected Stripe event ${event.id}: ${response.status} ${await response.text()}`)
+}
+
+function getLakeIngest(): { url: string; secret: string } | undefined {
+  try {
+    return Resource.LakeIngest
+  } catch {
+    return undefined
+  }
+}
+
+function toLakeStripeEvent(event: Stripe.Event) {
+  const object = record(event.data.object) ?? {}
+  const objectType = string(object.object)
+  const objectID = string(object.id)
+  const metadata = record(object.metadata)
+  const cancellationDetails = record(object.cancellation_details)
+  const firstLine = array(record(object.lines)?.data)[0]
+  const firstItem = array(record(object.items)?.data)[0]
+  const firstRefund = array(record(object.refunds)?.data)[0]
+  const firstPayment = record(array(record(object.payments)?.data)[0]?.payment)
+  const price = record(firstItem?.price)
+  const linePricing = record(firstLine?.pricing)
+  const linePriceDetails = record(linePricing?.price_details)
+  const eventTimestamp = new Date(event.created * 1000).toISOString()
+
+  return {
+    _datalake_key: "billing.stripe",
+    event_timestamp: eventTimestamp,
+    event_date: eventTimestamp.slice(0, 10),
+    event_id: event.id,
+    event_type: event.type,
+    api_version: event.api_version,
+    livemode: event.livemode,
+    pending_webhooks: event.pending_webhooks,
+    request_id: event.request?.id,
+    idempotency_key: event.request?.idempotency_key,
+    object_id: objectID,
+    object_type: objectType,
+    object_created_timestamp: timestamp(integer(object.created)),
+    customer_id: id(object.customer) ?? (objectType === "customer" ? objectID : undefined),
+    customer_email: string(object.customer_email) ?? string(object.email),
+    customer_name: string(object.customer_name) ?? string(object.name),
+    customer_phone: string(object.customer_phone) ?? string(object.phone),
+    workspace_id: string(metadata?.workspaceID),
+    user_id: string(metadata?.userID),
+    user_email: string(metadata?.userEmail),
+    subscription_id:
+      id(object.subscription) ??
+      id(record(object.parent)?.subscription_details, "subscription") ??
+      (objectType === "subscription" ? objectID : undefined),
+    invoice_id: id(object.invoice) ?? id(object.latest_invoice) ?? (objectType === "invoice" ? objectID : undefined),
+    charge_id: objectType === "charge" ? objectID : id(object.charge),
+    payment_intent_id: id(object.payment_intent) ?? id(firstPayment, "payment_intent"),
+    payment_method_id: id(object.payment_method) ?? id(object.default_payment_method),
+    checkout_session_id: objectType === "checkout.session" ? objectID : undefined,
+    refund_id: objectType === "refund" ? objectID : id(firstRefund),
+    product_id: id(price?.product) ?? string(linePriceDetails?.product),
+    price_id: id(price) ?? string(linePriceDetails?.price),
+    quantity: integer(firstItem?.quantity) ?? integer(firstLine?.quantity),
+    status: string(object.status),
+    billing_reason: string(object.billing_reason),
+    collection_method: string(object.collection_method),
+    cancel_at_period_end: boolean(object.cancel_at_period_end),
+    canceled_at_timestamp: timestamp(integer(object.canceled_at)),
+    cancel_at_timestamp: timestamp(integer(object.cancel_at)),
+    cancellation_reason: string(cancellationDetails?.reason),
+    currency: string(object.currency),
+    amount: integer(object.amount),
+    amount_paid: integer(object.amount_paid),
+    amount_due: integer(object.amount_due),
+    amount_refunded: integer(object.amount_refunded),
+    refunded: boolean(object.refunded),
+    refund_reason: string(object.reason),
+    current_period_start_timestamp: timestamp(integer(object.current_period_start)),
+    current_period_end_timestamp: timestamp(integer(object.current_period_end)),
+    metadata: json(metadata),
+    previous_attributes: json(record(event.data.previous_attributes)),
+  }
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  return value as Record<string, unknown>
+}
+
+function array(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const itemRecord = record(item)
+    return itemRecord ? [itemRecord] : []
+  })
+}
+
+function id(value: unknown, key = "id") {
+  if (typeof value === "string") return value
+  return string(record(value)?.[key])
+}
+
+function string(value: unknown) {
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return undefined
+}
+
+function boolean(value: unknown) {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") return value === "true" ? true : value === "false" ? false : undefined
+  return undefined
+}
+
+function integer(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value)
+  if (typeof value !== "string") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.round(parsed) : undefined
+}
+
+function timestamp(value: number | undefined) {
+  return value === undefined ? undefined : new Date(value * 1000).toISOString()
+}
+
+function json(value: Record<string, unknown> | undefined) {
+  return value && Object.keys(value).length > 0 ? JSON.stringify(value) : undefined
 }
