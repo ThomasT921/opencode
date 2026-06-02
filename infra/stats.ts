@@ -87,94 +87,12 @@ const inferenceEventTable = new aws.s3tables.Table(
   { deleteBeforeReplace: $app.stage !== "production" },
 )
 
-const billingNamespace = new aws.s3tables.Namespace("LakeBillingNamespace", {
-  namespace: "billing",
-  tableBucketArn: tableBucket.arn,
-})
-
-const stripeTable = new aws.s3tables.Table(
-  "LakeBillingStripeTable",
-  {
-    name: "stripe",
-    namespace: billingNamespace.namespace,
-    tableBucketArn: billingNamespace.tableBucketArn,
-    format: "ICEBERG",
-    metadata: {
-      iceberg: {
-        schema: {
-          fields: [
-            { name: "event_timestamp", type: "string", required: false },
-            { name: "event_date", type: "string", required: false },
-            { name: "event_id", type: "string", required: false },
-            { name: "event_type", type: "string", required: false },
-            { name: "api_version", type: "string", required: false },
-            { name: "livemode", type: "boolean", required: false },
-            { name: "pending_webhooks", type: "int", required: false },
-            { name: "request_id", type: "string", required: false },
-            { name: "idempotency_key", type: "string", required: false },
-            { name: "object_id", type: "string", required: false },
-            { name: "object_type", type: "string", required: false },
-            { name: "object_created_timestamp", type: "string", required: false },
-            { name: "customer_id", type: "string", required: false },
-            { name: "customer_email", type: "string", required: false },
-            { name: "customer_name", type: "string", required: false },
-            { name: "customer_phone", type: "string", required: false },
-            { name: "workspace_id", type: "string", required: false },
-            { name: "user_id", type: "string", required: false },
-            { name: "user_email", type: "string", required: false },
-            { name: "subscription_id", type: "string", required: false },
-            { name: "invoice_id", type: "string", required: false },
-            { name: "charge_id", type: "string", required: false },
-            { name: "payment_intent_id", type: "string", required: false },
-            { name: "payment_method_id", type: "string", required: false },
-            { name: "checkout_session_id", type: "string", required: false },
-            { name: "refund_id", type: "string", required: false },
-            { name: "product_id", type: "string", required: false },
-            { name: "price_id", type: "string", required: false },
-            { name: "quantity", type: "long", required: false },
-            { name: "status", type: "string", required: false },
-            { name: "billing_reason", type: "string", required: false },
-            { name: "collection_method", type: "string", required: false },
-            { name: "cancel_at_period_end", type: "boolean", required: false },
-            { name: "canceled_at_timestamp", type: "string", required: false },
-            { name: "cancel_at_timestamp", type: "string", required: false },
-            { name: "cancellation_reason", type: "string", required: false },
-            { name: "currency", type: "string", required: false },
-            { name: "amount", type: "long", required: false },
-            { name: "amount_paid", type: "long", required: false },
-            { name: "amount_due", type: "long", required: false },
-            { name: "amount_refunded", type: "long", required: false },
-            { name: "refunded", type: "boolean", required: false },
-            { name: "refund_reason", type: "string", required: false },
-            { name: "current_period_start_timestamp", type: "string", required: false },
-            { name: "current_period_end_timestamp", type: "string", required: false },
-            { name: "metadata", type: "string", required: false },
-            { name: "previous_attributes", type: "string", required: false },
-          ],
-        },
-      },
-    },
-  },
-  { deleteBeforeReplace: $app.stage !== "production" },
-)
-
 export const inferenceEvent = new sst.Linkable("InferenceEvent", {
   properties: {
     region: lakeRegion,
     catalog: lakeCatalog,
     database: inferenceNamespace.namespace,
     table: inferenceEventTable.name,
-    tableBucket: tableBucket.name,
-    workgroup: lakeAthenaWorkgroup.name,
-  },
-})
-
-export const stripeEvent = new sst.Linkable("StripeEvent", {
-  properties: {
-    region: lakeRegion,
-    catalog: lakeCatalog,
-    database: billingNamespace.namespace,
-    table: stripeTable.name,
     tableBucket: tableBucket.name,
     workgroup: lakeAthenaWorkgroup.name,
   },
