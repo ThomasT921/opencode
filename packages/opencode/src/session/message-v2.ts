@@ -29,6 +29,7 @@ import { eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
@@ -47,6 +48,7 @@ interface FetchDecompressionError extends Error {
 }
 
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
+const COMPACTED_TOOL_OUTPUT = "[Old tool result content cleared]"
 export { isMedia }
 
 function truncateToolOutput(text: string, maxChars?: number) {
@@ -96,7 +98,7 @@ const info = (row: typeof MessageTable.$inferSelect) =>
     sessionID: row.session_id,
   }) as Info
 
-const part = (row: typeof PartTable.$inferSelect) =>
+const part = (row: Pick<typeof PartTable.$inferSelect, "id" | "session_id" | "message_id" | "data">) =>
   ({
     ...row.data,
     id: row.id,
@@ -107,20 +109,41 @@ const part = (row: typeof PartTable.$inferSelect) =>
 const older = (row: Cursor) =>
   or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
 
-function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
+function hydrate(
+  db: Database.Interface["db"],
+  rows: (typeof MessageTable.$inferSelect)[],
+  sync?: Database.Interface["sync"],
+) {
   const ids = rows.map((row) => row.id)
   const partByMessage = new Map<string, Part[]>()
   return Effect.gen(function* () {
     if (ids.length > 0) {
-      const partRows = yield* db
-        .select()
-        .from(PartTable)
-        .where(inArray(PartTable.message_id, ids))
-        .orderBy(PartTable.message_id, PartTable.id)
-        .all()
-        .pipe(Effect.orDie)
+      const partRows = sync
+        ? yield* db
+            .select({
+              id: PartTable.id,
+              message_id: PartTable.message_id,
+              session_id: PartTable.session_id,
+              // Keep oversized UI metadata available to extensions without decoding it for every prompt.
+              data: sql`coalesce(${PartTable.data_model}, ${PartTable.data})`
+                .mapWith(PartTable.data)
+                .as("data"),
+              lazy_metadata: sql<number>`${PartTable.data_model} IS NOT NULL`.as("lazy_metadata"),
+            })
+            .from(PartTable)
+            .where(inArray(PartTable.message_id, ids))
+            .orderBy(PartTable.message_id, PartTable.id)
+            .all()
+            .pipe(Effect.orDie)
+        : yield* db
+            .select({ id: PartTable.id, message_id: PartTable.message_id, session_id: PartTable.session_id, data: PartTable.data })
+            .from(PartTable)
+            .where(inArray(PartTable.message_id, ids))
+            .orderBy(PartTable.message_id, PartTable.id)
+            .all()
+            .pipe(Effect.orDie)
       for (const row of partRows) {
-        const next = part(row)
+        const next = "lazy_metadata" in row && row.lazy_metadata && sync ? lazyMetadata(sync, part(row)) : part(row)
         const list = partByMessage.get(row.message_id)
         if (list) list.push(next)
         else partByMessage.set(row.message_id, [next])
@@ -132,6 +155,67 @@ function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$infer
       parts: partByMessage.get(row.id) ?? [],
     }))
   })
+}
+
+function lazyMetadata(db: Database.Interface["sync"], part: Part) {
+  if (part.type !== "tool" || part.state.status !== "completed") return part
+  defineLazyMetadata(part.state, () => {
+    // Prompt history is short-lived. Resolve against canonical storage only when
+    // an extension explicitly reads metadata instead of decoding it every turn.
+    const row = db
+      .select({ metadata: sql<string>`json_extract(${PartTable.data}, '$.state.metadata')` })
+      .from(PartTable)
+      .where(eq(PartTable.id, part.id))
+      .get()
+    return row?.metadata ? JSON.parse(row.metadata) : {}
+  })
+  return part
+}
+
+function defineLazyMetadata(state: SessionV1.ToolStateCompleted, load: () => Record<string, any>) {
+  let metadata: Record<string, any> | undefined
+  Object.defineProperty(state, "metadata", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      metadata ??= load()
+      return metadata
+    },
+    set(value: Record<string, any>) {
+      metadata = value
+    },
+  })
+}
+
+export function cloneForTransform(input: WithParts[]) {
+  // structuredClone resolves getters, so mask and restore lazy metadata.
+  const lazy = new Map<string, () => Record<string, any>>()
+  const masked = input.map((msg) => ({
+    ...msg,
+    parts: msg.parts.map((part) => {
+      if (part.type !== "tool" || part.state.status !== "completed") return part
+      const load = Object.getOwnPropertyDescriptor(part.state, "metadata")?.get
+      if (!load) return part
+      lazy.set(part.id, () => structuredClone(load.call(part.state)))
+      return {
+        ...part,
+        state: Object.fromEntries(
+          Object.keys(part.state)
+            .filter((key) => key !== "metadata")
+            .map((key) => [key, Reflect.get(part.state, key)]),
+        ),
+      } as Part
+    }),
+  }))
+  const result = structuredClone(masked) as WithParts[]
+  for (const msg of result) {
+    for (const part of msg.parts) {
+      if (part.type !== "tool" || part.state.status !== "completed") continue
+      const load = lazy.get(part.id)
+      if (load) defineLazyMetadata(part.state, load)
+    }
+  }
+  return result
 }
 
 function providerMeta(metadata: Record<string, any> | undefined) {
@@ -302,7 +386,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
             const outputText = part.state.time.compacted
-              ? "[Old tool result content cleared]"
+              ? COMPACTED_TOOL_OUTPUT
               : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
@@ -433,12 +517,17 @@ export function toModelMessages(
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
 
-export const page = Effect.fn("MessageV2.page")(function* (input: {
+type PageInput = {
   sessionID: SessionID
   limit: number
   before?: string
-}) {
-  const { db } = yield* Database.Service
+}
+
+const pageWithOptions = Effect.fnUntraced(function* (
+  input: PageInput & { lazyCompletedToolMetadata?: boolean },
+) {
+  const database = yield* Database.Service
+  const db = database.db
   const before = input.before ? cursor.decode(input.before) : undefined
   const where = before
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
@@ -467,7 +556,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
 
   const more = rows.length > input.limit
   const slice = more ? rows.slice(0, input.limit) : rows
-  const items = yield* hydrate(db, slice)
+  const items = yield* hydrate(db, slice, input.lazyCompletedToolMetadata ? database.sync : undefined)
   items.reverse()
   const tail = slice.at(-1)
   return {
@@ -475,6 +564,10 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
     more,
     cursor: more && tail ? cursor.encode({ id: tail.id, time: tail.time_created }) : undefined,
   }
+})
+
+export const page = Effect.fn("MessageV2.page")(function* (input: PageInput) {
+  return yield* pageWithOptions(input)
 })
 
 export function stream(sessionID: SessionID) {
@@ -504,7 +597,7 @@ export function parts(messageID: MessageID) {
   return Effect.gen(function* () {
     const { db } = yield* Database.Service
     const rows = yield* db
-      .select()
+      .select({ id: PartTable.id, message_id: PartTable.message_id, session_id: PartTable.session_id, data: PartTable.data })
       .from(PartTable)
       .where(eq(PartTable.message_id, messageID))
       .orderBy(PartTable.id)
@@ -529,29 +622,57 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
   }
 })
 
+export const related = Effect.fn("MessageV2.related")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
+  const { db } = yield* Database.Service
+  return yield* db
+    .select()
+    .from(MessageTable)
+    .where(
+      and(
+        eq(MessageTable.session_id, input.sessionID),
+        or(
+          eq(MessageTable.id, input.messageID),
+          and(
+            sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`,
+            sql`json_extract(${MessageTable.data}, '$.parentID') = ${input.messageID}`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(MessageTable.time_created, MessageTable.id)
+    .all()
+    .pipe(Effect.flatMap((rows) => hydrate(db, rows)), Effect.orDie)
+})
+
 export function filterCompacted(msgs: Iterable<WithParts>) {
   const result = [] as WithParts[]
-  const completed = new Set<string>()
-  let retain: MessageID | undefined
+  const state = compactedState()
   for (const msg of msgs) {
     result.push(msg)
-    if (retain) {
-      if (msg.info.id === retain) break
-      continue
-    }
-    if (msg.info.role === "user" && completed.has(msg.info.id)) {
-      const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
-      if (!part) continue
-      if (!part.tail_start_id) break
-      retain = part.tail_start_id
-      if (msg.info.id === retain) break
-      continue
-    }
-    if (msg.info.role === "user" && completed.has(msg.info.id) && msg.parts.some((part) => part.type === "compaction"))
-      break
-    if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
-      completed.add(msg.info.parentID)
+    if (reachedCompactedBoundary(state, msg)) break
   }
+  return reorderCompacted(result)
+}
+
+function compactedState() {
+  return { completed: new Set<string>(), retain: undefined as MessageID | undefined }
+}
+
+function reachedCompactedBoundary(state: ReturnType<typeof compactedState>, msg: WithParts) {
+  if (state.retain) return msg.info.id === state.retain
+  if (msg.info.role === "user" && state.completed.has(msg.info.id)) {
+    const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
+    if (!part) return false
+    if (!part.tail_start_id) return true
+    state.retain = part.tail_start_id
+    return msg.info.id === state.retain
+  }
+  if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
+    state.completed.add(msg.info.parentID)
+  return false
+}
+
+function reorderCompacted(result: WithParts[]) {
   result.reverse()
   const compactionIndex = result.findLastIndex(
     (msg) =>
@@ -583,7 +704,28 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
 }
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
-  return filterCompacted(yield* stream(sessionID))
+  // Stop paging once older compacted history would be discarded anyway.
+  const size = 50
+  const result = [] as WithParts[]
+  const state = compactedState()
+  let before: string | undefined
+  while (true) {
+    const next = yield* pageWithOptions({ sessionID, limit: size, before, lazyCompletedToolMetadata: true }).pipe(
+      Effect.catchIf(NotFoundError.isInstance, () =>
+        Effect.succeed({ items: [] as WithParts[], more: false, cursor: undefined }),
+      ),
+    )
+    if (next.items.length === 0) break
+    for (let i = next.items.length - 1; i >= 0; i--) {
+      const item = next.items[i]
+      if (!item) continue
+      result.push(item)
+      if (reachedCompactedBoundary(state, item)) return reorderCompacted(result)
+    }
+    if (!next.more || !next.cursor) break
+    before = next.cursor
+  }
+  return reorderCompacted(result)
 })
 
 // filterCompacted reorders messages for model consumption

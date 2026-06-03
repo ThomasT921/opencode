@@ -382,6 +382,20 @@ function autocontinue(enabled: boolean) {
   })
 }
 
+function messagesTransform(inspect: (messages: SessionV1.WithParts[]) => void) {
+  return Layer.mock(Plugin.Service)({
+    trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
+      if (name !== "experimental.chat.messages.transform") return Effect.succeed(output)
+      return Effect.sync(() => {
+        inspect((output as { messages: SessionV1.WithParts[] }).messages)
+        return output
+      })
+    },
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+  })
+}
+
 describe("session.compaction.isOverflow", () => {
   it.live(
     "returns true when token count exceeds usable context",
@@ -682,8 +696,18 @@ describe("session.compaction.prune", () => {
               status: "completed",
               input: {},
               output: "x".repeat(200_000),
+              attachments: [
+                {
+                  id: PartID.ascending(),
+                  messageID: b.id,
+                  sessionID: info.id,
+                  type: "file",
+                  mime: "text/plain",
+                  url: "data:text/plain;base64,eA==",
+                },
+              ],
               title: "done",
-              metadata: {},
+              metadata: { output: "x".repeat(200_000), description: "done" },
               time: { start: Date.now(), end: Date.now() },
             },
           })
@@ -713,9 +737,34 @@ describe("session.compaction.prune", () => {
           expect(part?.state.status).toBe("completed")
           if (part?.type === "tool" && part.state.status === "completed") {
             expect(part.state.time.compacted).toBeNumber()
+            expect(part.state.output).toHaveLength(200_000)
+            expect(part.state.metadata.output).toHaveLength(200_000)
+            expect(part.state.attachments).toHaveLength(1)
+
+            const compacted = (yield* MessageV2.filterCompactedEffect(info.id))
+              .flatMap((msg) => msg.parts)
+              .find((part) => part.type === "tool")
+            expect(compacted?.type).toBe("tool")
+            if (compacted?.type === "tool" && compacted.state.status === "completed") {
+              expect(Object.getOwnPropertyDescriptor(compacted.state, "metadata")?.get).toBeFunction()
+              expect(compacted.state.output).toHaveLength(200_000)
+              expect(compacted.state.metadata.output).toHaveLength(200_000)
+              expect(compacted.state.attachments).toHaveLength(1)
+              expect(JSON.parse(JSON.stringify(compacted.state)).metadata.output).toHaveLength(200_000)
+
+              part.state.metadata = { description: "small" }
+              yield* ssn.updatePart(part)
+              const small = (yield* MessageV2.filterCompactedEffect(info.id))
+                .flatMap((msg) => msg.parts)
+                .find((item) => item.id === part.id)
+              expect(small?.type).toBe("tool")
+              if (small?.type === "tool" && small.state.status === "completed") {
+                expect(Object.getOwnPropertyDescriptor(small.state, "metadata")?.get).toBeUndefined()
+                expect(small.state.metadata).toEqual({ description: "small" })
+              }
+            }
           }
         }),
-
       {
         config: {
           compaction: { prune: true },
@@ -815,6 +864,52 @@ describe("session.compaction.prune", () => {
 })
 
 describe("session.compaction.process", () => {
+  itCompaction.instance(
+    "keeps oversized tool metadata lazy through the plugin transform clone",
+    () => {
+      let lazy = false
+      return Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        const first = yield* createUserMessage(session.id, "first")
+        const assistant = yield* createAssistantMessage(session.id, first.id, test.directory)
+        yield* ssn.updatePart({
+          id: PartID.ascending(),
+          messageID: assistant.id,
+          sessionID: session.id,
+          type: "tool",
+          tool: "apply_patch",
+          callID: "call_test",
+          state: {
+            status: "completed",
+            input: {},
+            output: "done",
+            title: "done",
+            metadata: { diff: "x".repeat(70_000) },
+            time: { start: Date.now(), end: Date.now() },
+          },
+        })
+        const parent = yield* createUserMessage(session.id, "compact")
+        const msgs = yield* MessageV2.filterCompactedEffect(session.id)
+
+        yield* SessionCompaction.use.process({ parentID: parent.id, messages: msgs, sessionID: session.id, auto: false })
+
+        expect(lazy).toBe(true)
+      }).pipe(
+        withCompaction({
+          config: cfg({ tail_turns: 0 }),
+          plugin: messagesTransform((messages) => {
+            const part = messages.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+            if (part?.type === "tool" && part.state.status === "completed") {
+              lazy = Object.getOwnPropertyDescriptor(part.state, "metadata")?.get !== undefined
+            }
+          }),
+        }),
+      )
+    },
+  )
+
   it.instance(
     "throws when parent is not a user message",
     Effect.gen(function* () {

@@ -8,12 +8,15 @@ import { Flag } from "../flag/flag"
 import { isAbsolute, join } from "path"
 import { DatabaseMigration } from "./migration"
 import { InstallationChannel } from "../installation/version"
+import { Sqlite } from "./sqlite"
 
 const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
 type DatabaseShape = Effect.Success<typeof makeDatabase>
 
 export interface Interface {
   db: DatabaseShape
+  // Lazy property getters cannot yield an Effect.
+  sync: Sqlite.DrizzleClient
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
@@ -22,6 +25,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const db = yield* makeDatabase
+    const sync = yield* Sqlite.Drizzle
 
     yield* db.run("PRAGMA journal_mode = WAL")
     yield* db.run("PRAGMA synchronous = NORMAL")
@@ -31,7 +35,7 @@ export const layer = Layer.effect(
     yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
     yield* DatabaseMigration.apply(db)
 
-    return { db }
+    return { db, sync }
   }).pipe(Effect.orDie),
 )
 

@@ -720,7 +720,7 @@ export const layer: Layer.Layer<
 
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
       const row = yield* db
-        .select()
+        .select({ id: PartTable.id, session_id: PartTable.session_id, message_id: PartTable.message_id, data: PartTable.data })
         .from(PartTable)
         .where(
           and(

@@ -14,6 +14,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import sessionMetadataMigration from "@opencode-ai/core/database/migration/20260511173437_session-metadata"
+import partModelDataMigration from "@opencode-ai/core/database/migration/20260603120017_warm_guardsmen"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
@@ -43,7 +44,7 @@ describe("DatabaseMigration", () => {
         expect(yield* db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session'`)).toEqual({
           name: "session",
         })
-        expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: 25 })
+        expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: 26 })
       }),
     )
   })
@@ -72,6 +73,30 @@ describe("DatabaseMigration", () => {
           tokens_reasoning: 4,
           tokens_cache_read: 5,
           tokens_cache_write: 6,
+        })
+      }),
+    )
+  })
+
+  test("backfills lightweight model data for oversized completed tool metadata", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE part (id text PRIMARY KEY, data text NOT NULL)`)
+        const large = JSON.stringify({ type: "tool", state: { status: "completed", metadata: { diff: "x".repeat(70_000) } } })
+        const unicode = JSON.stringify({ type: "tool", state: { status: "completed", metadata: { diff: "😀".repeat(20_000) } } })
+        const small = JSON.stringify({ type: "tool", state: { status: "completed", metadata: { diff: "small" } } })
+        yield* db.run(sql`INSERT INTO part (id, data) VALUES (${"large"}, ${large}), (${"unicode"}, ${unicode}), (${"small"}, ${small})`)
+
+        yield* DatabaseMigration.applyOnly(db, [partModelDataMigration])
+
+        expect(yield* db.get(sql`SELECT data, data_model FROM part WHERE id = ${"large"}`)).toEqual({
+          data: large,
+          data_model: JSON.stringify({ type: "tool", state: { status: "completed" } }),
+        })
+        expect(yield* db.get(sql`SELECT data_model FROM part WHERE id = ${"small"}`)).toEqual({ data_model: null })
+        expect(yield* db.get(sql`SELECT data_model FROM part WHERE id = ${"unicode"}`)).toEqual({
+          data_model: JSON.stringify({ type: "tool", state: { status: "completed" } }),
         })
       }),
     )

@@ -85,6 +85,8 @@ export const PartTable = sqliteTable(
     session_id: text().$type<SessionSchema.ID>().notNull(),
     ...Timestamps,
     data: text({ mode: "json" }).notNull().$type<V1PartData>(),
+    // Derived prompt projection; data remains canonical.
+    data_model: text({ mode: "json" }).$type<V1PartData>(),
   },
   (table) => [
     index("part_message_id_id_idx").on(table.message_id, table.id),

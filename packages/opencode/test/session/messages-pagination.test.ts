@@ -553,6 +553,32 @@ describe("MessageV2.get", () => {
   )
 })
 
+describe("MessageV2.related", () => {
+  it.instance("returns one user turn and its assistant replies", () =>
+    withSession(({ session, sessionID }) =>
+      Effect.gen(function* () {
+        yield* addUser(sessionID, "older")
+        const user = yield* addUser(sessionID, "target")
+        const first = yield* addAssistant(sessionID, user)
+        const second = yield* addAssistant(sessionID, user)
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          sessionID,
+          messageID: second,
+          type: "text",
+          text: "response",
+        })
+        yield* addUser(sessionID, "newer")
+
+        const result = yield* MessageV2.related({ sessionID, messageID: user })
+
+        expect(result.map((item) => item.info.id)).toEqual([user, first, second])
+        expect(result[2].parts).toHaveLength(1)
+      }),
+    ),
+  )
+})
+
 describe("Session.messages", () => {
   it.instance("returns all messages in chronological order across pages", () =>
     withSession(({ session, sessionID }) =>
@@ -645,6 +671,31 @@ describe("MessageV2.filterCompacted", () => {
     ),
   )
 
+  it.instance("effect stops at compaction boundary beyond the first page", () =>
+    withSession(({ session, sessionID }) =>
+      Effect.gen(function* () {
+        yield* fill(sessionID, 55, (index: number) => index)
+        const compact = yield* addUser(sessionID)
+        yield* addCompactionPart(sessionID, compact)
+        const summary = yield* addAssistant(sessionID, compact, { summary: true, finish: "end_turn" })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          sessionID,
+          messageID: summary,
+          type: "text",
+          text: "summary",
+        })
+        yield* fill(sessionID, 55)
+
+        const expected = MessageV2.filterCompacted(yield* MessageV2.stream(sessionID))
+        const result = yield* MessageV2.filterCompactedEffect(sessionID)
+
+        expect(result).toEqual(expected)
+        expect(result).toHaveLength(57)
+      }),
+    ),
+  )
+
   it.live("handles empty iterable", () =>
     Effect.sync(() => {
       const result = MessageV2.filterCompacted([])
@@ -661,6 +712,22 @@ describe("MessageV2.filterCompacted", () => {
 
         const result = MessageV2.filterCompacted(yield* MessageV2.stream(sessionID))
         expect(result).toHaveLength(2)
+      }),
+    ),
+  )
+
+  it.instance("does not break on summary without matching compaction part", () =>
+    withSession(({ sessionID }) =>
+      Effect.gen(function* () {
+        const user = yield* addUser(sessionID, "hello")
+        yield* addAssistant(sessionID, user, { summary: true, finish: "end_turn" })
+        yield* addUser(sessionID, "world")
+
+        const expected = MessageV2.filterCompacted(yield* MessageV2.stream(sessionID))
+        const result = yield* MessageV2.filterCompactedEffect(sessionID)
+
+        expect(result).toEqual(expected)
+        expect(result).toHaveLength(3)
       }),
     ),
   )

@@ -19,6 +19,7 @@ import { eq } from "drizzle-orm"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { resetDatabase } from "../fixture/db"
 import { testEffect } from "../lib/effect"
+import { disposeInstance } from "@/effect/instance-registry"
 
 const env = Layer.mergeAll(
   Session.defaultLayer,
@@ -40,10 +41,10 @@ const json = (req: Parameters<typeof HttpClientResponse.fromWeb>[0], body: unkno
 
 const none = HttpClient.make(() => Effect.die("unexpected http call"))
 
-function live(client: HttpClient.HttpClient) {
+function live(client: HttpClient.HttpClient, events = EventV2Bridge.defaultLayer) {
   const http = Layer.succeed(HttpClient.HttpClient, client)
   return ShareNext.layer.pipe(
-    Layer.provide(EventV2Bridge.defaultLayer),
+    Layer.provide(events),
     Layer.provide(Account.layer.pipe(Layer.provide(AccountRepo.defaultLayer), Layer.provide(http))),
     Layer.provide(Config.defaultLayer),
     Layer.provide(Database.defaultLayer),
@@ -101,6 +102,34 @@ beforeEach(async () => {
 })
 
 describe("ShareNext", () => {
+  it.live("unsubscribes event listeners when the instance is disposed", () =>
+    provideTmpdirInstance((directory) => {
+      let active = 0
+      const events = Layer.mock(EventV2Bridge.Service, {
+        listen: () =>
+          Effect.sync(() => {
+            active++
+            return Effect.sync(() => {
+              active--
+            })
+          }),
+      })
+
+      return Effect.gen(function* () {
+        const share = yield* ShareNext.Service
+        let peak = 0
+        for (let index = 0; index < 20; index++) {
+          yield* share.init()
+          peak = Math.max(peak, active)
+          yield* Effect.promise(() => disposeInstance(directory))
+        }
+
+        expect(peak).toBe(5)
+        expect(active).toBe(0)
+      }).pipe(Effect.provide(live(none, events)))
+    }),
+  )
+
   it.live("request uses legacy share API without active org account", () =>
     provideTmpdirInstance(
       () =>

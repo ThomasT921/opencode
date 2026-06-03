@@ -12,6 +12,7 @@ import path from "path"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Schema } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
+import { SessionPartModelData } from "@opencode-ai/core/session/model-data"
 
 const decodeMessageInfo = Schema.decodeUnknownSync(SessionV1.Info)
 const decodePart = Schema.decodeUnknownSync(SessionV1.Part)
@@ -212,6 +213,8 @@ const runImport = Effect.fn("Cli.import.body")(function* (file: string, ctx: Ins
           message_id: messageID,
           session_id: row.id,
           data: partData,
+          // Keep imported history on the same prompt path as live updates.
+          data_model: SessionPartModelData.create(partData),
         })
         .onConflictDoNothing()
         .run()

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+PACKAGE_DIR="$ROOT/packages/opencode"
+INSTALLED=${OPENCODE_INSTALL_PATH:-$(command -v opencode || true)}
+
+if [[ -z "$INSTALLED" ]]; then
+  echo "opencode is not installed or is not on PATH" >&2
+  echo "Set OPENCODE_INSTALL_PATH to the executable you want to replace." >&2
+  exit 1
+fi
+
+INSTALLED=$(realpath "$INSTALLED")
+TARGET=$(bun --eval 'process.stdout.write(`opencode-${process.platform}-${process.arch}`)')
+BINARY="$PACKAGE_DIR/dist/$TARGET/bin/opencode"
+
+bun run --cwd "$PACKAGE_DIR" build --single "$@"
+
+if [[ ! -x "$BINARY" ]]; then
+  echo "Expected build output does not exist: $BINARY" >&2
+  exit 1
+fi
+
+if [[ ! -e "$INSTALLED.backup" ]]; then
+  cp -p "$INSTALLED" "$INSTALLED.backup"
+  echo "Backed up $INSTALLED to $INSTALLED.backup"
+fi
+
+install -m 755 "$BINARY" "$INSTALLED"
+
+echo "Installed local build at $INSTALLED"
+"$INSTALLED" --version

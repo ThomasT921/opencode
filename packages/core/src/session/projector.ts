@@ -11,6 +11,7 @@ import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "./sql"
 import type { DeepMutable } from "../schema"
+import { SessionPartModelData } from "./model-data"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -309,7 +310,7 @@ export const layer = Layer.effectDiscard(
     yield* events.project(SessionV1.Event.MessageRemoved, (event) =>
       Effect.gen(function* () {
         const rows = yield* db
-          .select()
+          .select({ session_id: PartTable.session_id, data: PartTable.data })
           .from(PartTable)
           .where(and(eq(PartTable.message_id, event.data.messageID), eq(PartTable.session_id, event.data.sessionID)))
           .all()
@@ -328,7 +329,7 @@ export const layer = Layer.effectDiscard(
     yield* events.project(SessionV1.Event.PartRemoved, (event) =>
       Effect.gen(function* () {
         const row = yield* db
-          .select()
+          .select({ session_id: PartTable.session_id, data: PartTable.data })
           .from(PartTable)
           .where(and(eq(PartTable.id, event.data.partID), eq(PartTable.session_id, event.data.sessionID)))
           .get()
@@ -348,11 +349,17 @@ export const layer = Layer.effectDiscard(
         const messageID = event.data.part.messageID
         const sessionID = event.data.part.sessionID
         const data = partData(event.data.part)
-        const row = yield* db.select().from(PartTable).where(eq(PartTable.id, id)).get().pipe(Effect.orDie)
+        const data_model = SessionPartModelData.create(data)
+        const row = yield* db
+          .select({ session_id: PartTable.session_id, data: PartTable.data })
+          .from(PartTable)
+          .where(eq(PartTable.id, id))
+          .get()
+          .pipe(Effect.orDie)
         yield* db
           .insert(PartTable)
-          .values({ id, message_id: messageID, session_id: sessionID, time_created: event.data.time, data })
-          .onConflictDoUpdate({ target: PartTable.id, set: { data } })
+          .values({ id, message_id: messageID, session_id: sessionID, time_created: event.data.time, data, data_model })
+          .onConflictDoUpdate({ target: PartTable.id, set: { data, data_model } })
           .run()
           .pipe(Effect.orDie)
         const previous = row && usage(row.data)
