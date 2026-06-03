@@ -11,9 +11,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./effect": "./src/effect.ts",
     "./server": "./src/server.ts",
     "./v2": "./src/v2/index.ts",
     "./v2/client": "./src/v2/client.ts",
+    "./v2/effect": "./src/v2/effect.ts",
     "./v2/gen/client": "./src/v2/gen/client/index.ts",
     "./v2/server": "./src/v2/server.ts"
   },
@@ -25,10 +27,12 @@
     "@tsconfig/node22": "catalog:",
     "@types/cross-spawn": "catalog:",
     "@types/node": "catalog:",
+    "@workos/oagen": "0.21.1",
     "@typescript/native-preview": "catalog:",
     "typescript": "catalog:"
   },
   "dependencies": {
-    "cross-spawn": "catalog:"
+    "cross-spawn": "catalog:",
+    "effect": "catalog:"
   }
 }

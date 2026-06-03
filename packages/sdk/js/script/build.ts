@@ -8,6 +8,8 @@ import { $ } from "bun"
 import path from "path"
 
 import { createClient } from "@hey-api/openapi-ts"
+import { generateFiles, parseSpec } from "@workos/oagen"
+import { effectEmitter } from "./effect-emitter.js"
 
 const opencode = path.resolve(dir, "../../opencode")
 
@@ -58,8 +60,41 @@ if (sseTypesPatched === sseTypesSource) {
 }
 await Bun.write(sseTypesPath, sseTypesPatched)
 
+const openapi = await Bun.file("./openapi.json").json()
+const effect = generateFiles(await parseSpec("./openapi.json"), effectEmitter, {
+  namespace: "Opencode",
+  outputDir: "./src/v2/gen",
+  emitterOptions: {
+    serverSentEvents: serverSentEvents(openapi),
+  },
+})
+for (const file of effect.files) {
+  await Bun.write(path.join("./src/v2/gen", file.path), file.content)
+}
+
 await $`bun prettier --write src/gen`
 await $`bun prettier --write src/v2`
 await $`rm -rf dist`
 await $`bun tsc`
 await $`rm openapi.json`
+
+function serverSentEvents(spec: unknown) {
+  if (!spec || typeof spec !== "object" || !("paths" in spec) || !spec.paths || typeof spec.paths !== "object")
+    return []
+
+  return Object.entries(spec.paths).flatMap(([route, value]) => {
+    if (!value || typeof value !== "object") return []
+
+    return Object.entries(value).flatMap(([method, operation]) => {
+      if (!operation || typeof operation !== "object" || !("responses" in operation)) return []
+      if (!hasEventStream(operation.responses)) return []
+      return [`${method.toUpperCase()} ${route}`]
+    })
+  })
+}
+
+function hasEventStream(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false
+  if ("text/event-stream" in value) return true
+  return Object.values(value).some(hasEventStream)
+}
