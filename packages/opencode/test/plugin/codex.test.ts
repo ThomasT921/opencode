@@ -137,31 +137,21 @@ describe("plugin.codex", () => {
 
     expect(disabledOptions.fetch).toBeUndefined()
     expect(enabledOptions.fetch).toBeFunction()
+    expect(disabledOptions.headerTimeout).toBeUndefined()
+    expect(enabledOptions.headerTimeout).toBe(false)
     await enabled.dispose?.()
   })
 
-  test("disables the HTTP header timeout when websocket transport is enabled", async () => {
-    const disabled = await CodexAuthPlugin({} as never)
+  test("disables the HTTP header timeout for websocket OAuth transport", async () => {
     const hooks = await CodexAuthPlugin({} as never, { experimentalWebSockets: true })
-    const disabledConfig = {} as Parameters<NonNullable<typeof hooks.config>>[0]
-    const config = {} as Parameters<NonNullable<typeof hooks.config>>[0]
+    const options = await hooks.auth!.loader!(
+      async () => ({ type: "oauth", refresh: "refresh", access: "access", expires: Date.now() + 60_000 }) as never,
+      {} as never,
+    )
 
-    await disabled.config!(disabledConfig)
-    await hooks.config!(config)
-
-    expect(disabledConfig.provider).toBeUndefined()
-    expect(config.provider?.openai?.options?.headerTimeout).toBe(false)
-  })
-
-  test("preserves explicit header timeout configuration when websocket transport is enabled", async () => {
-    const hooks = await CodexAuthPlugin({} as never, { experimentalWebSockets: true })
-    const config = { provider: { openai: { options: { headerTimeout: 30_000 } } } } as Parameters<
-      NonNullable<typeof hooks.config>
-    >[0]
-
-    await hooks.config!(config)
-
-    expect(config.provider.openai.options.headerTimeout).toBe(30_000)
+    expect(options.fetch).toBeFunction()
+    expect(options.headerTimeout).toBe(false)
+    await hooks.dispose?.()
   })
 
   test("deduplicates concurrent Codex token refreshes", async () => {

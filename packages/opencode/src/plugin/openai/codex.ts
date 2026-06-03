@@ -358,13 +358,6 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
   const websocketFetches: Array<ReturnType<typeof OpenAIWebSocketPool.createWebSocketFetch>> = []
 
   return {
-    async config(config) {
-      if (!options.experimentalWebSockets) return
-      config.provider ??= {}
-      config.provider.openai ??= {}
-      config.provider.openai.options ??= {}
-      config.provider.openai.options.headerTimeout ??= false
-    },
     async dispose() {
       for (const websocketFetch of websocketFetches) websocketFetch.close()
       websocketFetches.length = 0
@@ -417,7 +410,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           websocketFetches.push(websocketFetch)
           websocketFetchInstalled = true
         }
-        if (auth.type !== "oauth") return websocketFetch ? { fetch: websocketFetch } : {}
+        if (auth.type !== "oauth") return websocketFetch ? { fetch: websocketFetch, headerTimeout: false } : {}
 
         let refreshPromise:
           | Promise<{
@@ -428,6 +421,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
 
         return {
           apiKey: OAUTH_DUMMY_KEY,
+          ...(websocketFetch ? { headerTimeout: false } : {}),
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
             if (init?.headers) {
               if (init.headers instanceof Headers) {

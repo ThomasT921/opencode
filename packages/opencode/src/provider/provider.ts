@@ -190,13 +190,13 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         options: ok ? {} : { apiKey: "public" },
       }
     }),
-    openai: () =>
+    openai: (input) =>
       Effect.succeed({
         autoload: false,
         async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
           return sdk.responses(modelID)
         },
-        options: { headerTimeout: OPENAI_HEADER_TIMEOUT_DEFAULT },
+        options: { headerTimeout: input.options.headerTimeout ?? OPENAI_HEADER_TIMEOUT_DEFAULT },
       }),
     xai: () =>
       Effect.succeed({

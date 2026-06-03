@@ -11,6 +11,7 @@ import { Env } from "@/env"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider/provider"
 import { ProviderError } from "@/provider/error"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -167,6 +168,42 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
       { openai: { type: "api", key: "sk-test" } },
     )
   }),
+)
+
+it.live("OpenAI Codex websocket transport disables default headerTimeout", () =>
+  Effect.gen(function* () {
+    yield* withAuthContent(
+      Effect.gen(function* () {
+        yield* provideTmpdirInstance(() =>
+          Effect.gen(function* () {
+            const provider = yield* Provider.Service
+            const openai = yield* provider.getProvider(ProviderV2.ID.openai)
+            expect(openai.options.headerTimeout).toBe(false)
+          }),
+        )
+      }),
+      { openai: { type: "api", key: "sk-test" } },
+    )
+  }).pipe(Effect.provide(RuntimeFlags.layer({ experimentalWebSockets: true }))),
+)
+
+it.live("OpenAI Codex websocket transport preserves configured headerTimeout", () =>
+  Effect.gen(function* () {
+    yield* withAuthContent(
+      Effect.gen(function* () {
+        yield* provideTmpdirInstance(
+          () =>
+            Effect.gen(function* () {
+              const provider = yield* Provider.Service
+              const openai = yield* provider.getProvider(ProviderV2.ID.openai)
+              expect(openai.options.headerTimeout).toBe(30_000)
+            }),
+          { config: { provider: { openai: { options: { headerTimeout: 30_000 } } } } },
+        )
+      }),
+      { openai: { type: "api", key: "sk-test" } },
+    )
+  }).pipe(Effect.provide(RuntimeFlags.layer({ experimentalWebSockets: true }))),
 )
 
 function providerConfig(url: string, options: Record<string, unknown> = {}) {
