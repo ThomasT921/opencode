@@ -1,11 +1,9 @@
 #!/usr/bin/env bun
 
-import { $ } from "bun"
 import { rm } from "fs/promises"
 import path from "path"
 import { Script } from "@opencode-ai/script"
 import { modelsData } from "./generate"
-import pkg from "../package.json"
 
 const dir = path.resolve(import.meta.dirname, "..")
 const binary = "lildax"
@@ -15,7 +13,6 @@ await rm("dist", { recursive: true, force: true })
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
-const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 
 const allTargets: {
@@ -45,8 +42,6 @@ const targets = singleFlag
       return item.abi === undefined
     })
   : allTargets
-
-if (!skipInstall) await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
 
 for (const item of targets) {
   const name = [
@@ -86,7 +81,23 @@ for (const item of targets) {
     },
   })
 
-  if (result.success) continue
-  for (const log of result.logs) console.error(log)
-  process.exit(1)
+  if (!result.success) {
+    for (const log of result.logs) console.error(log)
+    process.exit(1)
+  }
+
+  await Bun.write(
+    `./dist/${name}/package.json`,
+    JSON.stringify(
+      {
+        name: `@opencode-ai/${name}`,
+        version: Script.version,
+        license: "MIT",
+        os: [item.os],
+        cpu: [item.arch],
+      },
+      null,
+      2,
+    ),
+  )
 }
