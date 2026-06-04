@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import * as OpenAIChat from "../src/protocols/openai-chat"
 import * as OpenAIResponses from "../src/protocols/openai-responses"
-import { ContentPart, LLMEvent, LLMRequest, Model, ModelID, ProviderID, Usage } from "../src/schema"
+import {
+  ContentPart,
+  LLMEvent,
+  LLMRequest,
+  Message,
+  Model,
+  ModelID,
+  ProviderID,
+  ToolCallPart,
+  Usage,
+} from "../src/schema"
 import { ProviderShared } from "../src/protocols/shared"
 
 const model = new Model({
@@ -52,6 +62,17 @@ describe("llm schema", () => {
     })
 
     expect(decoded.messages[0]).toMatchObject({ role: "system", content: [{ type: "text", text: "Operator update." }] })
+  })
+
+  test("rejects chronological system updates between a local tool call and its result", async () => {
+    const previous = Message.assistant([
+      ToolCallPart.make({ id: "call_1", name: "lookup", input: {} }),
+      { type: "text", text: "Waiting." },
+    ])
+
+    await expect(Effect.runPromise(ProviderShared.guardSystemUpdatePlacement("Test", previous))).rejects.toThrow(
+      "Test chronological system updates cannot appear between a local tool call and its tool result",
+    )
   })
 
   test("rejects invalid event type", () => {

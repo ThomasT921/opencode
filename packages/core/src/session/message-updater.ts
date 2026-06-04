@@ -159,6 +159,9 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       },
       "session.next.prompt.admitted": () => Effect.void,
       "session.next.prompt.promoted": () => Effect.void,
+      "session.next.context.initialized": () => Effect.void,
+      "session.next.context.updated": () => Effect.void,
+      "session.next.context.replaced": () => Effect.void,
       "session.next.synthetic": (event) => {
         return adapter.appendMessage(
           new SessionMessage.Synthetic({

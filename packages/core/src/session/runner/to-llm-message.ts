@@ -9,6 +9,8 @@ import {
 } from "@opencode-ai/llm"
 import { SessionMessage } from "../message"
 import type { FileAttachment } from "../prompt"
+import { SessionContext } from "../context"
+import { SystemContext } from "../../system-context"
 
 const media = (file: FileAttachment): ContentPart => ({
   type: "media",
@@ -91,7 +93,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model) => {
   return [Message.make({ id: message.id, role: "assistant", content, metadata: message.metadata }), ...results]
 }
 
-function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] {
+function toLLMMessage(message: SessionContext.RunnerMessage, model: Model): Message[] {
   switch (message.type) {
     case "agent-switched":
     case "model-switched":
@@ -131,9 +133,11 @@ function toLLMMessage(message: SessionMessage.Message, model: Model): Message[] 
           metadata: message.metadata,
         }),
       ]
+    case "system-context":
+      return [Message.system(SystemContext.render(message.parts))]
   }
 }
 
 /** Translate projected V2 Session history into canonical @opencode-ai/llm context. */
-export const toLLMMessages = (messages: readonly SessionMessage.Message[], model: Model) =>
+export const toLLMMessages = (messages: readonly SessionContext.RunnerMessage[], model: Model) =>
   messages.flatMap((message) => toLLMMessage(message, model))

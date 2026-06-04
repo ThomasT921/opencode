@@ -40,6 +40,7 @@ import { RequestExecutor } from "@opencode-ai/llm/route"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
 import { SessionRunCoordinator } from "./session/run-coordinator"
+import { SessionSystemContext } from "./session-system-context"
 import { FetchHttpClient } from "effect/unstable/http"
 
 export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("@opencode/example/LocationServiceMap", {
@@ -60,6 +61,7 @@ export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("
       Watcher.locationLayer,
       Pty.locationLayer,
       SkillV2.locationLayer,
+      SessionSystemContext.locationLayer,
       permissionsAndTools,
       LocationMutation.locationLayer.pipe(Layer.orDie),
     ).pipe(Layer.provideMerge(location))

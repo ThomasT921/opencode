@@ -686,3 +686,65 @@ Compatibility:
 
 - Foreground V2 bash execution is unchanged.
 - Reintroduce background bash only with durable status observation, completion delivery, and explicit cancellation semantics.
+
+## 2026-06-04: Initialize Durable Session Context Epochs
+
+Affected schema:
+
+- Add synchronized `session.next.context.initialized.1` Session events.
+- Add `session_context_epoch` for one active immutable keyed baseline, component-hash checkpoint, and baseline sequence per Session.
+
+Change:
+
+- Lazily initialize one durable Context Epoch at the first safe provider-turn boundary.
+- Lower its exact keyed baseline parts through `LLMRequest.system` for every provider turn in the epoch.
+- Reuse the stored baseline verbatim after restart or producer changes instead of resampling privileged initial context.
+- Keep ordinary Session transcript APIs unchanged.
+
+Compatibility:
+
+- This adds one database migration and one synchronized Session event type.
+- Existing experimental V2 Session databases remain disposable across incompatible pre-launch event-schema changes.
+- Chronological context updates, replacement epochs after compaction or model switches, project instructions, skills guidance, and plugin transforms remain follow-up slices.
+
+## 2026-06-04: Admit Chronological Session Context Updates
+
+Affected schema:
+
+- Add synchronized `session.next.context.updated.1` Session events.
+- Add `session_context_epoch.revision` for transactional checkpoint advancement.
+- Add `session_context_message` for hidden chronological keyed context updates ordered by Session aggregate sequence.
+
+Change:
+
+- Refresh Location-scoped Context Components at each safe provider-turn boundary.
+- Keep the stored baseline immutable while admitting changed component values as runner-private chronological `Message.system(...)` history.
+- Advance component-hash checkpoints transactionally even when a removed component produces no visible update text.
+- Keep ordinary Session transcript APIs unchanged while runner history merges visible Session messages and hidden context updates by durable aggregate sequence.
+- Reject chronological system updates that would split a local tool call from its result across provider protocols; use wrapped user fallback when Anthropic native system-update placement is unsupported.
+
+Compatibility:
+
+- This adds one database migration and one synchronized Session event type.
+- Existing experimental V2 Session databases remain disposable across incompatible pre-launch event-schema changes.
+- Replacement epochs after compaction or model switches, project instructions, skills guidance, and plugin transforms remain follow-up slices.
+
+## 2026-06-04: Replace Session Context Epochs Lazily
+
+Affected schema:
+
+- Add synchronized `session.next.context.replaced.1` Session events.
+- Add `session_context_epoch.replacement_pending` and `session_context_epoch.replacement_seq` for idempotent lazy replacement requests.
+
+Change:
+
+- Mark the active Context Epoch for replacement after a model switch or completed compaction projection.
+- Persist the triggering aggregate sequence so same-target replay cannot reopen an already-settled replacement.
+- Render and persist the fresh immutable baseline lazily at the next safe provider-turn boundary.
+- Exclude hidden chronological updates from earlier epochs when assembling active provider history.
+
+Compatibility:
+
+- This adds two additive database migrations and one synchronized Session event type.
+- Existing experimental V2 Session databases remain disposable across incompatible pre-launch event-schema changes.
+- Compaction execution, project instructions, skills guidance, and plugin transforms remain follow-up slices.

@@ -200,8 +200,9 @@ const lowerToolCall = (part: ToolCallPart) => ({
 const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMRequest) {
   const contents: GeminiContent[] = []
 
-  for (const message of request.messages) {
+  for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
+      yield* ProviderShared.guardSystemUpdatePlacement("Gemini", request.messages[index - 1])
       const part = yield* ProviderShared.wrappedSystemUpdate("Gemini", message)
       const previous = contents.at(-1)
       if (previous?.role === "user")

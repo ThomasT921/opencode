@@ -13,6 +13,9 @@ import { fromRow } from "./info"
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
   readonly context: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
+  readonly runnerContext: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<SessionContext.RunnerMessage[], MessageDecodeError>
   readonly message: (
     messageID: SessionMessage.ID,
   ) => Effect.Effect<{ readonly sessionID: SessionSchema.ID; readonly message: SessionMessage.Message } | undefined>
@@ -33,6 +36,9 @@ export const layer = Layer.effect(
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
         return yield* SessionContext.load(db, sessionID)
+      }),
+      runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID) {
+        return yield* SessionContext.loadForRunner(db, sessionID)
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {
         const row = yield* db

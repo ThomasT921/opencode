@@ -351,38 +351,17 @@ const endsInServerToolUse = (message: LLMRequest["messages"][number]) => {
   return message.role === "assistant" && last?.type === "tool-call" && last.providerExecuted === true
 }
 
-const endsInLocalToolUse = (message: LLMRequest["messages"][number]) => {
-  const last = message.content.at(-1)
-  return message.role === "assistant" && last?.type === "tool-call" && last.providerExecuted !== true
-}
-
-const validateNativeSystemUpdate = Effect.fn("AnthropicMessages.validateNativeSystemUpdate")(function* (
-  messages: LLMRequest["messages"],
-  index: number,
-) {
+const canUseNativeSystemUpdate = (messages: LLMRequest["messages"], index: number) => {
   const previous = messages[index - 1]
   const next = messages[index + 1]
-  if (!previous)
-    return yield* invalid(
-      "Anthropic Messages chronological system updates cannot be the first message; use LLMRequest.system",
-    )
-  if (previous.role === "system")
-    return yield* invalid("Anthropic Messages chronological system updates cannot be consecutive")
-  if (endsInLocalToolUse(previous))
-    return yield* invalid(
-      "Anthropic Messages chronological system updates cannot appear between a local tool call and its tool result",
-    )
-  if (previous.role !== "user" && previous.role !== "tool" && !endsInServerToolUse(previous))
-    return yield* invalid(
-      "Anthropic Messages chronological system updates must follow a user message, tool result, or assistant server tool use",
-    )
-  if (next?.role === "system")
-    return yield* invalid("Anthropic Messages chronological system updates cannot be consecutive")
-  if (next && next.role !== "assistant")
-    return yield* invalid(
-      "Anthropic Messages chronological system updates must end the messages array or immediately precede an assistant message",
-    )
-})
+  return (
+    previous !== undefined &&
+    previous.role !== "system" &&
+    (previous.role === "user" || previous.role === "tool" || endsInServerToolUse(previous)) &&
+    next?.role !== "system" &&
+    (next === undefined || next.role === "assistant")
+  )
+}
 
 const lowerNativeSystemUpdate = Effect.fn("AnthropicMessages.lowerNativeSystemUpdate")(function* (
   message: LLMRequest["messages"][number],
@@ -407,8 +386,8 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
 
   for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
-      if (supportsNativeSystemUpdates(request)) {
-        yield* validateNativeSystemUpdate(request.messages, index)
+      yield* ProviderShared.guardSystemUpdatePlacement("Anthropic Messages", request.messages[index - 1])
+      if (supportsNativeSystemUpdates(request) && canUseNativeSystemUpdate(request.messages, index)) {
         messages.push(yield* lowerNativeSystemUpdate(message, breakpoints))
         continue
       }

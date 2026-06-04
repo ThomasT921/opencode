@@ -1,4 +1,4 @@
-import { LLM, LLMClient, LLMError, LLMEvent } from "@opencode-ai/llm"
+import { LLM, LLMClient, LLMError, LLMEvent, SystemPart } from "@opencode-ai/llm"
 import { Cause, DateTime, Effect, FiberSet, Layer, Semaphore, Stream } from "effect"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
@@ -14,6 +14,8 @@ import { SessionRunnerModel } from "./model"
 import { Database } from "../../database/database"
 import { SessionInput } from "../input"
 import { QuestionV2 } from "../../question"
+import { SessionSystemContext } from "../../session-system-context"
+import { SessionContextEpoch } from "../context-epoch"
 
 /**
  * Runs one durable coding-agent Session until it settles.
@@ -85,6 +87,7 @@ export const layer = Layer.effect(
     const tools = yield* ToolRegistry.Service
     const models = yield* SessionRunnerModel.Service
     const store = yield* SessionStore.Service
+    const systemContext = yield* SessionSystemContext.Service
     const db = (yield* Database.Service).db
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
@@ -94,6 +97,9 @@ export const layer = Layer.effect(
 
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
       return yield* store.context(sessionID)
+    })
+    const getRunnerContext = Effect.fn("SessionRunner.getRunnerContext")(function* (sessionID: SessionSchema.ID) {
+      return yield* store.runnerContext(sessionID)
     })
 
     const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
@@ -141,8 +147,14 @@ export const layer = Layer.effect(
         }
       }
       yield* failInterruptedTools(session.id)
-      const context = yield* getContext(session.id)
-      const request = LLM.request({ model, messages: toLLMMessages(context, model), tools: yield* tools.definitions() })
+      const system = yield* SessionContextEpoch.prepare(db, events, systemContext, session.id)
+      const context = yield* getRunnerContext(session.id)
+      const request = LLM.request({
+        model,
+        system: system.map((part) => SystemPart.make(part.text)),
+        messages: toLLMMessages(context, model),
+        tools: yield* tools.definitions(),
+      })
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
         agent: session.agent ?? "build",

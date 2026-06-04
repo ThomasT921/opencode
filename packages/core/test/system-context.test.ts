@@ -112,7 +112,7 @@ describe("SystemContext", () => {
     expect(refreshed).toEqual({ changes: [], checkpoint: previous })
   })
 
-  test("drops checkpoints for removed components", async () => {
+  test("emits tombstones and drops checkpoints for removed components", async () => {
     const context = SystemContext.struct({
       date: SystemContext.value({
         key: key("core/date"),
@@ -126,7 +126,7 @@ describe("SystemContext", () => {
     })
 
     expect(refreshed).toEqual({
-      changes: [],
+      changes: [{ key: key("plugin/removed"), text: "System context component removed: plugin/removed" }],
       checkpoint: { "core/date": Hash.sha256("The current date is 2026-06-03.") },
     })
   })

@@ -1,0 +1,1 @@
+ALTER TABLE `session_context_epoch` ADD `replacement_seq` integer;

@@ -177,6 +177,20 @@ export const wrappedSystemUpdate = Effect.fn("ProviderShared.wrappedSystemUpdate
   return { type: "text" as const, text: wrapSystemUpdate(content), cache: content.at(-1)?.cache }
 })
 
+export const guardSystemUpdatePlacement = Effect.fn("ProviderShared.guardSystemUpdatePlacement")(function* (
+  route: string,
+  previous: LLMRequest["messages"][number] | undefined,
+) {
+  if (
+    previous?.role === "assistant" &&
+    previous.content.some((part) => part.type === "tool-call" && part.providerExecuted !== true)
+  )
+    return yield* invalidRequest(
+      `${route} chronological system updates cannot appear between a local tool call and its tool result`,
+    )
+  return yield* Effect.void
+})
+
 /**
  * Parse the streamed JSON input of a tool call. Treats an empty string as
  * `"{}"` — providers occasionally finish a tool call without ever emitting

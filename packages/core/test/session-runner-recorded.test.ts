@@ -19,6 +19,9 @@ import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionSystemContext } from "@opencode-ai/core/session-system-context"
+import { SystemContext } from "@opencode-ai/core/system-context"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { describe, expect } from "bun:test"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
@@ -55,6 +58,23 @@ const model = OpenAIChat.route
   })
   .model({ id: "gpt-4o-mini" })
 const models = SessionRunnerModel.layerWith(() => Effect.succeed(model))
+const systemContext = Layer.succeed(
+  SessionSystemContext.Service,
+  SessionSystemContext.Service.of({
+    load: () =>
+      Effect.succeed({
+        entries: [
+          {
+            _tag: "Available" as const,
+            key: SystemContext.Key.make("test/context"),
+            baseline: "Recorded context",
+            update: "Recorded context",
+            hash: Hash.sha256("Recorded context"),
+          },
+        ],
+      }),
+  }),
+)
 const runner = SessionRunnerLLM.defaultLayer.pipe(
   Layer.provide(database),
   Layer.provide(store),
@@ -62,6 +82,7 @@ const runner = SessionRunnerLLM.defaultLayer.pipe(
   Layer.provide(client),
   Layer.provide(registry),
   Layer.provide(models),
+  Layer.provide(systemContext),
 )
 const coordinator = SessionRunCoordinator.layer.pipe(Layer.provide(runner))
 const execution = Layer.effect(
@@ -88,6 +109,7 @@ const it = testEffect(
     permission,
     registry,
     models,
+    systemContext,
     runner,
     coordinator,
     execution,
@@ -145,6 +167,7 @@ describe("SessionRunnerLLM recorded", () => {
       ).toEqual([
         "session.next.prompt.admitted.1",
         "session.next.prompt.promoted.1",
+        "session.next.context.initialized.1",
         "session.next.step.started.1",
         "session.next.text.started.1",
         "session.next.text.ended.1",

@@ -49,6 +49,13 @@ export interface Part {
   readonly text: string
 }
 
+export const PartSchema = Schema.Struct({
+  key: Key,
+  text: Schema.String,
+})
+export const PartsSchema = Schema.Array(PartSchema)
+export const CheckpointSchema = Schema.Record(Schema.String, Schema.String)
+
 export type Checkpoint = Readonly<Record<string, string>>
 
 export interface Initialized {
@@ -105,11 +112,18 @@ export function initialize(snapshot: Snapshot): Initialized {
 
 export function refresh(snapshot: Snapshot, previous: Checkpoint): Refreshed {
   return {
-    changes: snapshot.entries.flatMap((entry) =>
-      entry._tag === "Available" && getCheckpoint(previous, entry.key) !== entry.hash
-        ? [{ key: entry.key, text: entry.update }]
-        : [],
-    ),
+    changes: [
+      ...snapshot.entries.flatMap((entry) =>
+        entry._tag === "Available" && getCheckpoint(previous, entry.key) !== entry.hash
+          ? [{ key: entry.key, text: entry.update }]
+          : [],
+      ),
+      ...Object.keys(previous).flatMap((key) =>
+        snapshot.entries.some((entry) => entry.key === key)
+          ? []
+          : [{ key: Key.make(key), text: `System context component removed: ${key}` }],
+      ),
+    ],
     checkpoint: nextCheckpoint(snapshot, previous),
   }
 }

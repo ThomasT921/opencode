@@ -9,6 +9,7 @@ import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { ToolOutput } from "@opencode-ai/core/tool-output"
 import { DateTime } from "effect"
+import { SystemContext } from "@opencode-ai/core/system-context"
 
 const created = DateTime.makeUnsafe(0)
 const id = (value: string) => SessionMessage.ID.make(`msg_${value}`)
@@ -84,6 +85,15 @@ describe("toLLMMessages", () => {
       [{ type: "text", text: "Shell command: pwd\n\n/project" }],
       [{ type: "text", text: "Summary of earlier conversation:\nEarlier work" }],
     ])
+  })
+
+  test("maps hidden Session context updates into chronological system messages", () => {
+    expect(
+      toLLMMessages(
+        [{ type: "system-context", parts: [{ key: SystemContext.Key.make("test/context"), text: "Updated context" }] }],
+        model,
+      ),
+    ).toEqual([Message.system("Updated context")])
   })
 
   test("expands assistant tool calls and settled outcomes into canonical tool messages", () => {
