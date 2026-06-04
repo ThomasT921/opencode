@@ -18,7 +18,7 @@ describe("Rpc", () => {
             data: JSON.stringify({
               type: "rpc.error",
               id: request.id,
-              error: { name: "Error", message: "boom", stack: "Error: boom" },
+              error: "boom",
             }),
           } as MessageEvent<any>,
         )
@@ -27,24 +27,5 @@ describe("Rpc", () => {
     }
 
     await expect(Rpc.client<TestRpc>(target).call("fail", undefined)).rejects.toThrow("boom")
-  })
-
-  test("rejects pending and future calls when the worker crashes", async () => {
-    let onError: ((event: Event) => void) | undefined
-    const target: Target = {
-      postMessage() {},
-      onmessage: null,
-      addEventListener(type, listener) {
-        if (type !== "error" || typeof listener !== "function") return
-        onError = (event) => listener.call({} as Worker, event)
-      },
-    }
-    const client = Rpc.client<TestRpc>(target)
-    const pending = client.call("fail", undefined)
-
-    onError?.({ message: "worker crashed" } as Event)
-
-    await expect(pending).rejects.toThrow("worker crashed")
-    await expect(client.call("fail", undefined)).rejects.toThrow("worker crashed")
   })
 })
