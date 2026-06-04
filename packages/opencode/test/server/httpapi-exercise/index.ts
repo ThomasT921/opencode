@@ -626,6 +626,21 @@ const scenarios: Scenario[] = [
     ),
   http.protected.get("/api/model", "v2.model.list").json(200, locationData(array)),
   http.protected.get("/api/provider", "v2.provider.list").json(200, locationData(array)),
+  http.protected.get("/api/command", "v2.command.list").json(200, locationData(array)),
+  http.protected.get("/api/skill", "v2.skill.list").json(200, locationData(array)),
+  http.protected
+    .get("/api/event", "v2.event.subscribe")
+    .stream()
+    .status(
+      200,
+      (ctx, result) =>
+        Effect.sync(() => {
+          check(result.contentType.includes("text/event-stream"), "v2 event should be an SSE stream")
+          check(result.text.includes("server.connected"), "v2 event should emit initial connection event")
+          check(result.text.includes(ctx.directory), "v2 event should include the resolved location")
+        }),
+      "status",
+    ),
   http.protected
     .get("/api/fs/read", "v2.fs.read")
     .seeded((ctx) => ctx.file("hello.txt", "hello\n"))
