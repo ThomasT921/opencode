@@ -10,6 +10,7 @@ import { DatabaseMigration } from "@opencode-ai/core/database/migration"
 import sessionUsageMigration from "@opencode-ai/core/database/migration/20260510033149_session_usage"
 import normalizeStoragePathsMigration from "@opencode-ai/core/database/migration/20260601010001_normalize_storage_paths"
 import sessionMessageProjectionOrderMigration from "@opencode-ai/core/database/migration/20260603040000_session_message_projection_order"
+import hardenV2SequenceIndexesMigration from "@opencode-ai/core/database/migration/20260604150931_harden_v2_sequence_indexes"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -62,19 +63,50 @@ describe("DatabaseMigration", () => {
         expect(
           yield* db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_input'`),
         ).toEqual({ name: "session_input" })
-        expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: 29 })
+        expect(yield* db.get(sql`SELECT count(*) as count FROM migration`)).toEqual({ count: 30 })
         expect(
           yield* db.all(
-            sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('event_aggregate_seq_idx', 'event_aggregate_type_seq_idx', 'session_input_session_pending_seq_idx', 'session_input_session_pending_delivery_seq_idx', 'session_message_session_idx', 'session_message_session_type_idx', 'session_message_session_seq_idx', 'session_message_session_type_seq_idx', 'session_message_session_time_created_id_idx') ORDER BY name`,
+            sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('event_aggregate_seq_idx', 'event_aggregate_seq_uidx', 'event_aggregate_type_seq_idx', 'session_input_session_pending_seq_idx', 'session_input_session_pending_delivery_seq_idx', 'session_message_session_idx', 'session_message_session_type_idx', 'session_message_session_seq_idx', 'session_message_session_seq_uidx', 'session_message_session_type_seq_idx', 'session_message_session_time_created_id_idx') ORDER BY name`,
           ),
         ).toEqual([
-          { name: "event_aggregate_seq_idx" },
-          { name: "event_aggregate_type_seq_idx" },
+          { name: "event_aggregate_seq_uidx" },
           { name: "session_input_session_pending_delivery_seq_idx" },
-          { name: "session_message_session_seq_idx" },
+          { name: "session_message_session_seq_uidx" },
           { name: "session_message_session_time_created_id_idx" },
           { name: "session_message_session_type_seq_idx" },
         ])
+      }),
+    )
+  })
+
+  test("enforces unique durable and timeline sequence positions", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE event (id text PRIMARY KEY, aggregate_id text NOT NULL, seq integer NOT NULL, type text NOT NULL)`,
+        )
+        yield* db.run(sql`CREATE INDEX event_aggregate_seq_idx ON event (aggregate_id, seq)`)
+        yield* db.run(sql`CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`)
+        yield* db.run(
+          sql`CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, seq integer NOT NULL)`,
+        )
+        yield* db.run(sql`CREATE INDEX session_message_session_seq_idx ON session_message (session_id, seq)`)
+
+        yield* DatabaseMigration.applyOnly(db, [hardenV2SequenceIndexesMigration])
+
+        yield* db.run(sql`INSERT INTO event (id, aggregate_id, seq, type) VALUES ('event_1', 'session_1', 1, 'one')`)
+        yield* db.run(sql`INSERT INTO session_message (id, session_id, seq) VALUES ('message_1', 'session_1', 1)`)
+        expect(() =>
+          Effect.runSync(
+            db.run(sql`INSERT INTO event (id, aggregate_id, seq, type) VALUES ('event_2', 'session_1', 1, 'two')`),
+          ),
+        ).toThrow()
+        expect(() =>
+          Effect.runSync(
+            db.run(sql`INSERT INTO session_message (id, session_id, seq) VALUES ('message_2', 'session_1', 1)`),
+          ),
+        ).toThrow()
       }),
     )
   })
