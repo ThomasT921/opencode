@@ -39,9 +39,9 @@
       "@octokit/rest": "22.0.0",
       "@hono/standard-validator": "0.2.0",
       "@hono/zod-validator": "0.4.2",
-      "@opentui/core": "0.0.0-20260604-b7a3ea1b",
-      "@opentui/keymap": "0.0.0-20260604-b7a3ea1b",
-      "@opentui/solid": "0.0.0-20260604-b7a3ea1b",
+      "@opentui/core": "0.0.0-20260604-29fa4a8a",
+      "@opentui/keymap": "0.0.0-20260604-29fa4a8a",
+      "@opentui/solid": "0.0.0-20260604-29fa4a8a",
       "ulid": "3.0.1",
       "@kobalte/core": "0.13.11",
       "@types/luxon": "3.7.1",
@@ -133,9 +133,9 @@
     "electron"
   ],
   "overrides": {
-    "@opentui/core": "0.0.0-20260604-b7a3ea1b",
-    "@opentui/keymap": "0.0.0-20260604-b7a3ea1b",
-    "@opentui/solid": "0.0.0-20260604-b7a3ea1b",
+    "@opentui/core": "0.0.0-20260604-29fa4a8a",
+    "@opentui/keymap": "0.0.0-20260604-29fa4a8a",
+    "@opentui/solid": "0.0.0-20260604-29fa4a8a",
     "@types/bun": "catalog:",
     "@types/node": "catalog:"
   },
