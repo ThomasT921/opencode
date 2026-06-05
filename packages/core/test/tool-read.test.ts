@@ -1,5 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import { Config } from "@opencode-ai/core/config"
+import { ConfigAttachments } from "@opencode-ai/core/config/attachments"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -11,6 +13,7 @@ import { testEffect } from "./lib/effect"
 
 const assertions: PermissionV2.AssertInput[] = []
 const reads: FileSystem.ReadInput[] = []
+const samples: number[] = []
 const textPageInputs: FileSystem.TextPageInput[] = []
 const pages: FileSystem.ListTarget[] = []
 const pageInputs: Pick<FileSystem.ListPageInput, "offset" | "limit">[] = []
@@ -22,6 +25,13 @@ let size = 5
 let real = "/project/README.md"
 let afterApproval = () => {}
 let readFailure: unknown
+let readContent: FileSystem.Content = new FileSystem.TextContent({
+  type: "text",
+  content: "hello",
+  mime: "text/plain",
+})
+let sample = new TextEncoder().encode("hello")
+let configEntries: Config.Entry[] = []
 const resourceReads: ToolOutputStore.ReadInput[] = []
 const filesystem = Layer.succeed(
   FileSystem.Service,
@@ -71,9 +81,14 @@ const filesystem = Layer.succeed(
       readFailure === undefined
         ? Effect.sync(() => {
             reads.push({ path: RelativePath.make("README.md") })
-            return new FileSystem.TextContent({ type: "text", content: "hello", mime: "text/plain" })
+            return readContent
           })
         : Effect.die(readFailure),
+    readSampleResolved: (_target, maximumBytes) =>
+      Effect.sync(() => {
+        samples.push(maximumBytes)
+        return sample.slice(0, maximumBytes)
+      }),
     readTextPageResolved: (_target, page = {}) =>
       readFailure === undefined
         ? Effect.sync(() => {
@@ -152,13 +167,15 @@ const resources = Layer.succeed(
       }),
   }),
 )
+const config = Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed(configEntries) }))
 const read = ReadTool.layer.pipe(
   Layer.provide(registry),
   Layer.provide(filesystem),
   Layer.provide(permission),
   Layer.provide(resources),
+  Layer.provide(config),
 )
-const it = testEffect(Layer.mergeAll(registry, filesystem, permission, resources, read))
+const it = testEffect(Layer.mergeAll(registry, filesystem, permission, resources, config, read))
 const sessionID = SessionV2.ID.make("ses_read_tool_test")
 
 describe("ReadTool", () => {
@@ -173,6 +190,9 @@ describe("ReadTool", () => {
       real = "/project/README.md"
       afterApproval = () => {}
       readFailure = undefined
+      readContent = new FileSystem.TextContent({ type: "text", content: "hello", mime: "text/plain" })
+      sample = new TextEncoder().encode("hello")
+      configEntries = []
       resolvedInput = undefined
       const registry = yield* ToolRegistry.Service
 
@@ -238,6 +258,90 @@ describe("ReadTool", () => {
       })
       expect(resourceReads).toEqual([{ sessionID, uri: "tool-output://opaque", offset: 2, limit: 10 }])
       expect(assertions).toEqual([])
+    }),
+  )
+
+  it.effect("returns supported images as model-native media", () =>
+    Effect.gen(function* () {
+      const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))
+      const source = new photon.PhotonImage(new Uint8Array(Array.from({ length: 4 }, () => 255)), 1, 1)
+      const content = Buffer.from(source.get_bytes()).toString("base64")
+      source.free()
+      allow = true
+      resolveFailure = undefined
+      listResolveFailure = new Error("not a directory")
+      size = 4
+      real = "/project/image.png"
+      afterApproval = () => {}
+      readFailure = undefined
+      readContent = new FileSystem.BinaryContent({
+        type: "binary",
+        content,
+        encoding: "base64",
+        mime: "image/png",
+      })
+      sample = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      const registry = yield* ToolRegistry.Service
+
+      expect(
+        yield* registry.execute({
+          sessionID,
+          call: { type: "tool-call", id: "call-image", name: "read", input: { path: "image.png" } },
+        }),
+      ).toEqual({
+        type: "content",
+        value: [
+          { type: "text", text: "Image read successfully" },
+          { type: "media", mediaType: "image/png", data: content, filename: "image.png" },
+        ],
+      })
+      expect(samples.at(-1)).toBe(FileSystem.READ_SAMPLE_BYTES)
+    }),
+  )
+
+  it.effect("applies configured image dimension limits before returning media", () =>
+    Effect.gen(function* () {
+      const photon = yield* Effect.promise(() => import("@silvia-odwyer/photon-node"))
+      const source = new photon.PhotonImage(new Uint8Array(Array.from({ length: 16 * 4 }, () => 255)), 16, 1)
+      allow = true
+      resolveFailure = undefined
+      listResolveFailure = new Error("not a directory")
+      size = source.get_bytes().length
+      real = "/project/wide.png"
+      afterApproval = () => {}
+      readFailure = undefined
+      readContent = new FileSystem.BinaryContent({
+        type: "binary",
+        content: Buffer.from(source.get_bytes()).toString("base64"),
+        encoding: "base64",
+        mime: "image/png",
+      })
+      source.free()
+      sample = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      configEntries = [
+        new Config.Document({
+          type: "document",
+          info: new Config.Info({
+            attachments: new ConfigAttachments.Info({
+              image: new ConfigAttachments.Image({ max_width: 4, max_height: 4 }),
+            }),
+          }),
+        }),
+      ]
+      const registry = yield* ToolRegistry.Service
+      const result = yield* registry.execute({
+        sessionID,
+        call: { type: "tool-call", id: "call-resize-image", name: "read", input: { path: "wide.png" } },
+      })
+      expect(result.type).toBe("content")
+      if (result.type !== "content") return
+      const media = result.value[1]
+      expect(media?.type).toBe("media")
+      if (media?.type !== "media") return
+      const resized = photon.PhotonImage.new_from_byteslice(Buffer.from(media.data, "base64"))
+      expect(resized.get_width()).toBeLessThanOrEqual(4)
+      expect(resized.get_height()).toBeLessThanOrEqual(4)
+      resized.free()
     }),
   )
 
@@ -364,6 +468,9 @@ describe("ReadTool", () => {
       real = "/project/large.txt"
       afterApproval = () => {}
       readFailure = undefined
+      readContent = new FileSystem.TextContent({ type: "text", content: "hello", mime: "text/plain" })
+      sample = new TextEncoder().encode("hello")
+      configEntries = []
       const registry = yield* ToolRegistry.Service
 
       expect(

@@ -22,6 +22,7 @@ export type ReadInput = typeof ReadInput.Type
 
 export const MAX_READ_LINES = 2_000
 export const MAX_READ_BYTES = 50 * 1024
+export const READ_SAMPLE_BYTES = 4 * 1024
 const MAX_LINE_LENGTH = 2_000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 
@@ -179,6 +180,7 @@ export interface Interface {
   readonly resolveReadPath: (input: ReadInput) => Effect.Effect<ReadPathTarget>
   readonly resolveRead: (input: ReadInput) => Effect.Effect<ReadTarget>
   readonly readResolved: (target: ReadTarget, maximumBytes?: number) => Effect.Effect<Content>
+  readonly readSampleResolved: (target: ReadTarget, maximumBytes: number) => Effect.Effect<Uint8Array>
   readonly readTextPageResolved: (target: ReadTarget, page?: TextPageInput) => Effect.Effect<TextPage>
   readonly list: (input?: ListInput) => Effect.Effect<Entry[]>
   /** Select a contained canonical read root without asserting leaf policy. */
@@ -342,6 +344,21 @@ export const layer = Layer.effect(
           if (bytes._tag === "Some" && bytes.value.length > maximumBytes)
             return yield* Effect.die(new ReadLimitError(target.resource, maximumBytes))
           return yield* content(target, bytes._tag === "Some" ? bytes.value : new Uint8Array())
+        }),
+      )
+    })
+    const readSampleResolved = Effect.fn("FileSystem.readSampleResolved")(function* (
+      target: ReadTarget,
+      maximumBytes: number,
+    ) {
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          const file = yield* fs.open(target.real, { flag: "r" }).pipe(Effect.orDie)
+          const info = yield* file.stat.pipe(Effect.orDie)
+          if (info.type !== "File") return yield* Effect.die(new Error("Path is not a file"))
+          if (info.dev !== target.dev || Option.getOrUndefined(info.ino) !== target.ino)
+            return yield* Effect.die(new Error("File changed after permission approval"))
+          return Option.getOrElse(yield* file.readAlloc(maximumBytes).pipe(Effect.orDie), () => new Uint8Array())
         }),
       )
     })
@@ -534,6 +551,7 @@ export const layer = Layer.effect(
       resolveReadPath,
       resolveRead,
       readResolved,
+      readSampleResolved,
       readTextPageResolved,
       list: Effect.fn("FileSystem.list")(function* (input) {
         return yield* listResolved(yield* resolveList(input))
