@@ -5,7 +5,6 @@ import { Bus } from "@/bus"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Effect, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -13,9 +12,6 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
-
-const log = EffectLogger.create({ service: "server" })
-
 function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
@@ -34,7 +30,6 @@ function parseBody(body: string) {
 }
 
 function eventResponse() {
-  log.info("global event connected")
   const events = Stream.callback<GlobalBusEvent>((queue) => {
     const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
     return Effect.acquireRelease(
@@ -53,7 +48,7 @@ function eventResponse() {
       Stream.map(eventData),
       Stream.pipeThroughChannel(Sse.encode()),
       Stream.encodeText,
-      Stream.ensuring(Effect.sync(() => log.info("global event disconnected"))),
+      Stream.ensuring(Effect.logInfo("global event disconnected").pipe(Effect.annotateLogs({ service: "server" }))),
     ),
     {
       contentType: "text/event-stream",

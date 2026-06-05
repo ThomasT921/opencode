@@ -1,16 +1,12 @@
 export * as ConfigCommand from "./command"
 
 import path from "path"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Cause, Exit, Schema } from "effect"
 import { Glob } from "@opencode-ai/core/util/glob"
 import { configEntryNameFromPath } from "./entry-name"
 import { InvalidError } from "./error"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigModelID } from "./model-id"
-
-const log = EffectLogger.create({ service: "config" })
-
 export const Info = Schema.Struct({
   template: Schema.String,
   description: Schema.optional(Schema.String),
@@ -32,7 +28,6 @@ export async function load(dir: string) {
     symlink: true,
   })) {
     const md = await ConfigMarkdown.parse(item).catch((err) => {
-      log.error("failed to load command", { command: item, err })
       return undefined
     })
     if (!md) continue

@@ -1,7 +1,6 @@
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
 import type { NodeSQLiteDatabase } from "drizzle-orm/node-sqlite"
 import { Global } from "@opencode-ai/core/global"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { ProjectTable } from "../project/project.sql"
 import { SessionTable, MessageTable, PartTable, TodoTable, PermissionTable } from "../session/session.sql"
 import { SessionShareTable } from "../share/share.sql"
@@ -9,9 +8,6 @@ import path from "path"
 import { existsSync } from "fs"
 import { Filesystem } from "@/util/filesystem"
 import { Glob } from "@opencode-ai/core/util/glob"
-
-const log = EffectLogger.create({ service: "json-migration" })
-
 export type Progress = {
   current: number
   total: number
@@ -26,7 +22,6 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
   const storageDir = path.join(Global.Path.data, "storage")
 
   if (!existsSync(storageDir)) {
-    log.info("storage directory does not exist, skipping migration")
     return {
       projects: 0,
       sessions: 0,
@@ -38,8 +33,6 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
       errors: [] as string[],
     }
   }
-
-  log.info("starting json to sqlite migration", { storageDir })
   const start = performance.now()
 
   // const db = drizzle({ client: sqlite })
@@ -105,9 +98,6 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
       return 0
     }
   }
-
-  // Pre-scan all files upfront to avoid repeated glob operations
-  log.info("scanning files...")
   const [projectFiles, sessionFiles, messageFiles, partFiles, todoFiles, permFiles, shareFiles] = await Promise.all([
     list("project/*.json"),
     list("session/*/*.json"),
@@ -117,17 +107,6 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     list("permission/*.json"),
     list("session_share/*.json"),
   ])
-
-  log.info("file scan complete", {
-    projects: projectFiles.length,
-    sessions: sessionFiles.length,
-    messages: messageFiles.length,
-    parts: partFiles.length,
-    todos: todoFiles.length,
-    permissions: permFiles.length,
-    shares: shareFiles.length,
-  })
-
   const total = Math.max(
     1,
     projectFiles.length +
@@ -179,10 +158,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     }
     stats.projects += insert(projectValues, ProjectTable, "project")
     step("projects", end - i)
-  }
-  log.info("migrated projects", { count: stats.projects, duration: Math.round(performance.now() - start) })
-
-  // Migrate sessions (depends on projects)
+  } // Migrate sessions (depends on projects)
   // Derive all IDs from directory/file paths, not JSON content, since earlier
   // migrations may have moved sessions to new directories without updating the JSON
   const sessionProjects = sessionFiles.map((file) => path.basename(path.dirname(file)))
@@ -233,9 +209,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     stats.sessions += insert(sessionValues, SessionTable, "session")
     step("sessions", end - i)
   }
-  log.info("migrated sessions", { count: stats.sessions })
   if (orphans.sessions > 0) {
-    log.warn("skipped orphaned sessions", { count: orphans.sessions })
   }
 
   // Migrate messages using pre-scanned file map
@@ -276,10 +250,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     values.length = count
     stats.messages += insert(values, MessageTable, "message")
     step("messages", end - i)
-  }
-  log.info("migrated messages", { count: stats.messages })
-
-  // Migrate parts using pre-scanned file map
+  } // Migrate parts using pre-scanned file map
   for (let i = 0; i < partFiles.length; i += batchSize) {
     const end = Math.min(i + batchSize, partFiles.length)
     const batch = await read(partFiles, i, end)
@@ -314,10 +285,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     values.length = count
     stats.parts += insert(values, PartTable, "part")
     step("parts", end - i)
-  }
-  log.info("migrated parts", { count: stats.parts })
-
-  // Migrate todos
+  } // Migrate todos
   const todoSessions = todoFiles.map((file) => path.basename(file, ".json"))
   for (let i = 0; i < todoFiles.length; i += batchSize) {
     const end = Math.min(i + batchSize, todoFiles.length)
@@ -352,9 +320,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     stats.todos += insert(values, TodoTable, "todo")
     step("todos", end - i)
   }
-  log.info("migrated todos", { count: stats.todos })
   if (orphans.todos > 0) {
-    log.warn("skipped orphaned todos", { count: orphans.todos })
   }
 
   // Migrate permissions
@@ -377,9 +343,7 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     stats.permissions += insert(permValues, PermissionTable, "permission")
     step("permissions", end - i)
   }
-  log.info("migrated permissions", { count: stats.permissions })
   if (orphans.permissions > 0) {
-    log.warn("skipped orphaned permissions", { count: orphans.permissions })
   }
 
   // Migrate session shares
@@ -406,27 +370,11 @@ export async function run(db: SQLiteBunDatabase<any, any> | NodeSQLiteDatabase<a
     stats.shares += insert(shareValues, SessionShareTable, "session_share")
     step("shares", end - i)
   }
-  log.info("migrated session shares", { count: stats.shares })
   if (orphans.shares > 0) {
-    log.warn("skipped orphaned session shares", { count: orphans.shares })
   }
 
   db.run("COMMIT")
-
-  log.info("json migration complete", {
-    projects: stats.projects,
-    sessions: stats.sessions,
-    messages: stats.messages,
-    parts: stats.parts,
-    todos: stats.todos,
-    permissions: stats.permissions,
-    shares: stats.shares,
-    errorCount: stats.errors.length,
-    duration: Math.round(performance.now() - start),
-  })
-
   if (stats.errors.length > 0) {
-    log.warn("migration errors", { errors: stats.errors.slice(0, 20) })
   }
 
   progress?.({ current: total, total, label: "complete" })

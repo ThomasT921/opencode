@@ -2,13 +2,9 @@ import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { iife } from "@/util/iife"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { setTimeout as sleep } from "node:timers/promises"
 import { CopilotModels } from "./models"
 import { MessageV2 } from "@/session/message-v2"
-
-const log = EffectLogger.create({ service: "plugin.copilot" })
-
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
@@ -74,7 +70,6 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
           },
           provider.models,
         ).catch((error) => {
-          log.error("failed to fetch copilot models", { error })
           return Object.fromEntries(
             Object.entries(provider.models).map(([id, model]) => [id, fix(model, base(auth.enterpriseUrl))]),
           )

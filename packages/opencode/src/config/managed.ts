@@ -3,11 +3,7 @@ export * as ConfigManaged from "./managed"
 import { existsSync } from "fs"
 import os from "os"
 import path from "path"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Process } from "@/util/process"
-
-const log = EffectLogger.create({ service: "config" })
-
 const MANAGED_PLIST_DOMAIN = "ai.opencode.managed"
 
 // Keys injected by macOS/MDM into the managed plist that are not OpenCode config
@@ -50,7 +46,6 @@ export async function readManagedPreferences() {
     try {
       return os.userInfo().username || "user"
     } catch (err) {
-      log.warn("failed to read system username, using fallback", { err })
       return "user"
     }
   })()
@@ -61,10 +56,8 @@ export async function readManagedPreferences() {
 
   for (const plist of paths) {
     if (!existsSync(plist)) continue
-    log.info("reading macOS managed preferences", { path: plist })
     const result = await Process.run(["plutil", "-convert", "json", "-o", "-", plist], { nothrow: true })
     if (result.code !== 0) {
-      log.warn("failed to convert managed preferences plist", { path: plist })
       continue
     }
     return {

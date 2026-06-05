@@ -1,6 +1,5 @@
 import { Provider } from "@/provider/provider"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
@@ -26,8 +25,6 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
-
-const log = EffectLogger.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
 export type StreamInput = {
@@ -79,18 +76,16 @@ const live: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
-      const l = log
-        .clone()
-        .tag("providerID", input.model.providerID)
-        .tag("modelID", input.model.id)
-        .tag("session.id", input.sessionID)
-        .tag("small", (input.small ?? false).toString())
-        .tag("agent", input.agent.name)
-        .tag("mode", input.agent.mode)
-      l.info("stream", {
-        modelID: input.model.id,
+      const logAnnotations = {
+        service: "llm",
         providerID: input.model.providerID,
-      })
+        modelID: input.model.id,
+        "session.id": input.sessionID,
+        small: (input.small ?? false).toString(),
+        agent: input.agent.name,
+        mode: input.agent.mode,
+      }
+      yield* Effect.logInfo("stream").pipe(Effect.annotateLogs(logAnnotations))
 
       const [language, cfg, item, info] = yield* Effect.all(
         [
@@ -255,7 +250,9 @@ const live: Layer.Layer<
             "llm.native_unsupported_reason": native.reason,
           }),
         )
-        l.info("native runtime unavailable; falling back to ai-sdk", { reason: native.reason })
+        yield* Effect.logInfo("native runtime unavailable; falling back to ai-sdk").pipe(
+          Effect.annotateLogs({ ...logAnnotations, reason: native.reason }),
+        )
       }
 
       yield* Effect.logInfo("llm runtime selected").pipe(
@@ -270,18 +267,15 @@ const live: Layer.Layer<
       return {
         type: "ai-sdk" as const,
         result: streamText({
-          onError(error) {
-            l.error("stream error", {
-              error,
-            })
-          },
+          onError(error) {},
           async experimental_repairToolCall(failed) {
             const lower = failed.toolCall.toolName.toLowerCase()
             if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
-              l.info("repairing tool call", {
-                tool: failed.toolCall.toolName,
-                repaired: lower,
-              })
+              await Effect.runPromise(
+                Effect.logInfo("repairing tool call").pipe(
+                  Effect.annotateLogs({ ...logAnnotations, tool: failed.toolCall.toolName, repaired: lower }),
+                ),
+              )
               return {
                 ...failed.toolCall,
                 toolName: lower,

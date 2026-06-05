@@ -7,13 +7,9 @@ import { lazy } from "@opencode-ai/core/util/lazy"
 import { Plugin } from "@/plugin"
 import { Shell } from "@/shell/shell"
 import type { Proc } from "#pty"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { PtyID } from "./schema"
 import { Effect, Layer, Context, Schema, Types } from "effect"
 import { NonNegativeInt, PositiveInt } from "@opencode-ai/core/schema"
-
-const log = EffectLogger.create({ service: "pty" })
-
 const BUFFER_LIMIT = 1024 * 1024 * 2
 const BUFFER_CHUNK = 64 * 1024
 const encoder = new TextEncoder()
@@ -167,7 +163,7 @@ export const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       const session = yield* requireSession(id)
       s.sessions.delete(id)
-      log.info("removing session", { id })
+      yield* Effect.logInfo("removing session").pipe(Effect.annotateLogs({ service: "pty", ...{ id } }))
       teardown(session)
       yield* bus.publish(Event.Deleted, { id: session.info.id })
     })
@@ -207,7 +203,9 @@ export const layer = Layer.effect(
         env.LC_CTYPE = "C.UTF-8"
         env.LANG = "C.UTF-8"
       }
-      log.info("creating session", { id, cmd: command, args, cwd })
+      yield* Effect.logInfo("creating session").pipe(
+        Effect.annotateLogs({ service: "pty", ...{ id, cmd: command, args, cwd } }),
+      )
 
       const { spawn } = yield* Effect.promise(() => pty())
       const proc = yield* Effect.sync(() =>
@@ -262,9 +260,7 @@ export const layer = Layer.effect(
         session.bufferCursor += excess
       })
       proc.onExit(({ exitCode }) => {
-        if (session.info.status === "exited") return
-        log.info("session exited", { id, exitCode })
-        session.info.status = "exited"
+        if (session.info.status === "exited") return (session.info.status = "exited")
         bridge.fork(bus.publish(Event.Exited, { id, exitCode }))
         bridge.fork(remove(id))
       })
@@ -306,7 +302,7 @@ export const layer = Layer.effect(
           }),
         ),
       )
-      log.info("client connected to session", { id })
+      yield* Effect.logInfo("client connected to session").pipe(Effect.annotateLogs({ service: "pty", ...{ id } }))
 
       const sub = sock(ws)
       session.subscribers.delete(sub)
@@ -354,7 +350,6 @@ export const layer = Layer.effect(
           session.process.write(typeof message === "string" ? message : new TextDecoder().decode(message))
         },
         onClose: () => {
-          log.info("client disconnected from session", { id })
           cleanup()
         },
       }

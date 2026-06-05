@@ -14,10 +14,6 @@ import { Effect, Scope } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { HistoryPayload, ReplayPayload, SessionPayload } from "../groups/sync"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
-
-const log = EffectLogger.create({ service: "server.sync" })
-
 export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handlers) =>
   Effect.gen(function* () {
     const workspace = yield* Workspace.Service
@@ -40,20 +36,30 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
         data: { ...event.data },
       }))
       const source = events[0].aggregateID
-      log.info("sync replay requested", {
-        sessionID: source,
-        events: events.length,
-        first: events[0]?.seq,
-        last: events.at(-1)?.seq,
-        directory: ctx.payload.directory,
-      })
+      yield* Effect.logInfo("sync replay requested").pipe(
+        Effect.annotateLogs({
+          service: "server.sync",
+          ...{
+            sessionID: source,
+            events: events.length,
+            first: events[0]?.seq,
+            last: events.at(-1)?.seq,
+            directory: ctx.payload.directory,
+          },
+        }),
+      )
       yield* sync.replayAll(events)
-      log.info("sync replay complete", {
-        sessionID: source,
-        events: events.length,
-        first: events[0]?.seq,
-        last: events.at(-1)?.seq,
-      })
+      yield* Effect.logInfo("sync replay complete").pipe(
+        Effect.annotateLogs({
+          service: "server.sync",
+          ...{
+            sessionID: source,
+            events: events.length,
+            first: events[0]?.seq,
+            last: events.at(-1)?.seq,
+          },
+        }),
+      )
       return { sessionID: source }
     })
 
@@ -68,10 +74,15 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
         },
       })
 
-      log.info("sync session stolen", {
-        sessionID: ctx.payload.sessionID,
-        workspaceID,
-      })
+      yield* Effect.logInfo("sync session stolen").pipe(
+        Effect.annotateLogs({
+          service: "server.sync",
+          ...{
+            sessionID: ctx.payload.sessionID,
+            workspaceID,
+          },
+        }),
+      )
 
       return { sessionID: ctx.payload.sessionID }
     })

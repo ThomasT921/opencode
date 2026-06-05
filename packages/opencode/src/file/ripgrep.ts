@@ -9,12 +9,9 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Global } from "@opencode-ai/core/global"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { sanitizedProcessEnv } from "@opencode-ai/core/util/opencode-process"
 import { which } from "@/util/which"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
-
-const log = EffectLogger.create({ service: "ripgrep" })
 const VERSION = "15.1.0"
 const PLATFORM = {
   "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
@@ -306,7 +303,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const url = `https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${filename}`
           const archive = path.join(Global.Path.bin, filename)
 
-          log.info("downloading ripgrep", { url })
+          yield* Effect.logInfo("downloading ripgrep").pipe(Effect.annotateLogs({ service: "ripgrep", ...{ url } }))
           yield* fs.ensureDir(Global.Path.bin).pipe(Effect.orDie)
 
           const bytes = yield* HttpClientRequest.get(url).pipe(
@@ -417,7 +414,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
       })
 
       const tree: Interface["tree"] = Effect.fn("Ripgrep.tree")(function* (input: TreeInput) {
-        log.info("tree", input)
+        yield* Effect.logInfo("tree").pipe(Effect.annotateLogs({ service: "ripgrep", ...input }))
         const list = Array.from(yield* files({ cwd: input.cwd, signal: input.signal }).pipe(Stream.runCollect))
 
         interface Node {

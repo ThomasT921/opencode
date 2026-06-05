@@ -1,8 +1,4 @@
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Bonjour } from "bonjour-service"
-
-const log = EffectLogger.create({ service: "mdns" })
-
 let bonjour: Bonjour | undefined
 let currentPort: number | undefined
 
@@ -22,17 +18,12 @@ export function publish(port: number, domain?: string) {
       txt: { path: "/" },
     })
 
-    service.on("up", () => {
-      log.info("mDNS service published", { name, port })
-    })
+    service.on("up", () => {})
 
-    service.on("error", (err) => {
-      log.error("mDNS service error", { error: err })
-    })
+    service.on("error", (err) => {})
 
     currentPort = port
   } catch (err) {
-    log.error("mDNS publish failed", { error: err })
     if (bonjour) {
       try {
         bonjour.destroy()
@@ -48,12 +39,9 @@ export function unpublish() {
     try {
       bonjour.unpublishAll()
       bonjour.destroy()
-    } catch (err) {
-      log.error("mDNS unpublish failed", { error: err })
-    }
+    } catch (err) {}
     bonjour = undefined
     currentPort = undefined
-    log.info("mDNS service unpublished")
   }
 }
 

@@ -12,7 +12,6 @@ import { Auth } from "@/auth"
 import { SyncEvent } from "@/sync"
 import { EventSequenceTable, EventTable } from "@/sync/event.sql"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProjectID } from "@/project/schema"
 import { Slug } from "@opencode-ai/core/util/slug"
@@ -76,9 +75,6 @@ function fromRow(row: typeof WorkspaceTable.$inferSelect): Info {
 
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
-
-const log = EffectLogger.create({ service: "workspace-sync" })
-
 export const CreateInput = Schema.Struct({
   id: Schema.optional(WorkspaceID),
   type: Info.fields.type,
@@ -292,24 +288,22 @@ export const layer = Layer.effect(
           return yield* store.provide({ directory: target.directory }, input.local())
         }
 
-        const response = yield* http.execute(input.remote({ workspace, target })).pipe(
-          Effect.catch((error) =>
-            Effect.sync(() => {
-              log.warn("workspace target request failed", {
-                workspaceID: workspace.id,
-                error: errorData(error),
-              })
-            }),
-          ),
-        )
+        const response = yield* http
+          .execute(input.remote({ workspace, target }))
+          .pipe(Effect.catch((error) => Effect.sync(() => {})))
         if (!response) return input.fallback
         if (response.status < 200 || response.status >= 300) {
           const body = yield* response.text.pipe(Effect.catch(() => Effect.succeed("")))
-          log.warn("workspace target request failed", {
-            workspaceID: workspace.id,
-            status: response.status,
-            body,
-          })
+          yield* Effect.logWarning("workspace target request failed").pipe(
+            Effect.annotateLogs({
+              service: "workspace-sync",
+              ...{
+                workspaceID: workspace.id,
+                status: response.status,
+                body,
+              },
+            }),
+          )
           return input.fallback
         }
 
@@ -318,10 +312,6 @@ export const layer = Layer.effect(
           Effect.map((result) => result as A),
           Effect.catch((error) =>
             Effect.sync(() => {
-              log.warn("workspace target response decode failed", {
-                workspaceID: workspace.id,
-                error: errorData(error),
-              })
               return input.fallback
             }),
           ),
@@ -349,11 +339,16 @@ export const layer = Layer.effect(
           )
         : {}
 
-      log.info("syncing workspace history", {
-        workspaceID: space.id,
-        sessions: sessionIDs.length,
-        known: Object.keys(state).length,
-      })
+      yield* Effect.logInfo("syncing workspace history").pipe(
+        Effect.annotateLogs({
+          service: "workspace-sync",
+          ...{
+            workspaceID: space.id,
+            sessions: sessionIDs.length,
+            known: Object.keys(state).length,
+          },
+        }),
+      )
 
       const response = yield* http.execute(
         HttpClientRequest.post(route(url, "/sync/history"), {
@@ -373,10 +368,15 @@ export const layer = Layer.effect(
 
       const events = (yield* response.json) as HistoryEvent[]
 
-      log.info("workspace history synced", {
-        workspaceID: space.id,
-        events: events.length,
-      })
+      yield* Effect.logInfo("workspace history synced").pipe(
+        Effect.annotateLogs({
+          service: "workspace-sync",
+          ...{
+            workspaceID: space.id,
+            events: events.length,
+          },
+        }),
+      )
 
       yield* Effect.forEach(
         events,
@@ -405,7 +405,9 @@ export const layer = Layer.effect(
       let attempt = 0
 
       while (true) {
-        log.info("connecting to global sync", { workspace: space.name })
+        yield* Effect.logInfo("connecting to global sync").pipe(
+          Effect.annotateLogs({ service: "workspace-sync", ...{ workspace: space.name } }),
+        )
         setStatus(space.id, "connecting")
 
         const stream = yield* connectSSE(target.url, target.headers).pipe(
@@ -413,10 +415,6 @@ export const layer = Layer.effect(
           Effect.catch((err) =>
             Effect.sync(() => {
               setStatus(space.id, "error")
-              log.info("failed to connect to global sync", {
-                workspace: space.name,
-                err,
-              })
               return null
             }),
           ),
@@ -425,7 +423,9 @@ export const layer = Layer.effect(
         if (stream) {
           attempt = 0
 
-          log.info("global sync connected", { workspace: space.name })
+          yield* Effect.logInfo("global sync connected").pipe(
+            Effect.annotateLogs({ service: "workspace-sync", ...{ workspace: space.name } }),
+          )
           setStatus(space.id, "connected")
 
           yield* parseSSE(stream, (evt) =>
@@ -439,10 +439,6 @@ export const layer = Layer.effect(
                   Effect.as(false),
                   Effect.catchCause((error) =>
                     Effect.sync(() => {
-                      log.info("failed to replay global event", {
-                        workspaceID: space.id,
-                        error,
-                      })
                       return true
                     }),
                   ),
@@ -459,15 +455,22 @@ export const layer = Layer.effect(
                   payload: event.payload,
                 })
               } catch (error) {
-                log.info("failed to replay global event", {
-                  workspaceID: space.id,
-                  error,
-                })
+                yield* Effect.logInfo("failed to replay global event").pipe(
+                  Effect.annotateLogs({
+                    service: "workspace-sync",
+                    ...{
+                      workspaceID: space.id,
+                      error,
+                    },
+                  }),
+                )
               }
             }),
           )
 
-          log.info("disconnected from global sync: " + space.id)
+          yield* Effect.logInfo("disconnected from global sync: " + space.id).pipe(
+            Effect.annotateLogs({ service: "workspace-sync" }),
+          )
           setStatus(space.id, "disconnected")
         }
 
@@ -485,10 +488,6 @@ export const layer = Layer.effect(
         Effect.catch((error) =>
           Effect.sync(() => {
             setStatus(space.id, "error")
-            log.warn("workspace target failed", {
-              workspaceID: space.id,
-              error: errorData(error),
-            })
             return null
           }),
         ),
@@ -514,10 +513,6 @@ export const layer = Layer.effect(
           Effect.catch((error) =>
             Effect.sync(() => {
               setStatus(space.id, "error")
-              log.warn("workspace listener failed", {
-                workspaceID: space.id,
-                error,
-              })
             }),
           ),
         ),
@@ -598,10 +593,15 @@ export const layer = Layer.effect(
 
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
       return yield* Effect.gen(function* () {
-        log.info("session warp requested", {
-          workspaceID: input.workspaceID,
-          sessionID: input.sessionID,
-        })
+        yield* Effect.logInfo("session warp requested").pipe(
+          Effect.annotateLogs({
+            service: "workspace-sync",
+            ...{
+              workspaceID: input.workspaceID,
+              sessionID: input.sessionID,
+            },
+          }),
+        )
 
         const current = yield* db((db) =>
           db
@@ -618,15 +618,7 @@ export const layer = Layer.effect(
 
             if (target.type === "remote") {
               yield* syncHistory(previous, target.url, target.headers).pipe(
-                Effect.catch((error) =>
-                  Effect.sync(() => {
-                    log.warn("session warp final source sync failed", {
-                      workspaceID: previous.id,
-                      sessionID: input.sessionID,
-                      error: errorData(error),
-                    })
-                  }),
-                ),
+                Effect.catch((error) => Effect.sync(() => {})),
               )
             } else {
               yield* prompt.cancel(input.sessionID)
@@ -676,11 +668,16 @@ export const layer = Layer.effect(
             },
           })
 
-          log.info("session warp complete", {
-            workspaceID: input.workspaceID,
-            sessionID: input.sessionID,
-            target: "local",
-          })
+          yield* Effect.logInfo("session warp complete").pipe(
+            Effect.annotateLogs({
+              service: "workspace-sync",
+              ...{
+                workspaceID: input.workspaceID,
+                sessionID: input.sessionID,
+                target: "local",
+              },
+            }),
+          )
           return
         }
 
@@ -702,11 +699,16 @@ export const layer = Layer.effect(
             },
           })
 
-          log.info("session warp complete", {
-            workspaceID: input.workspaceID,
-            sessionID: input.sessionID,
-            target: target.directory,
-          })
+          yield* Effect.logInfo("session warp complete").pipe(
+            Effect.annotateLogs({
+              service: "workspace-sync",
+              ...{
+                workspaceID: input.workspaceID,
+                sessionID: input.sessionID,
+                target: target.directory,
+              },
+            }),
+          )
           return
         }
 
@@ -733,15 +735,20 @@ export const layer = Layer.effect(
         const batches = Iterable.chunksOf(rows, 10)
         const total = Iterable.size(batches)
 
-        log.info("session warp prepared", {
-          workspaceID: input.workspaceID,
-          sessionID: input.sessionID,
-          target: String(route(target.url, "/sync/replay")),
-          events: rows.length,
-          batches: total,
-          first: rows[0]?.seq,
-          last: rows.at(-1)?.seq,
-        })
+        yield* Effect.logInfo("session warp prepared").pipe(
+          Effect.annotateLogs({
+            service: "workspace-sync",
+            ...{
+              workspaceID: input.workspaceID,
+              sessionID: input.sessionID,
+              target: String(route(target.url, "/sync/replay")),
+              events: rows.length,
+              batches: total,
+              first: rows[0]?.seq,
+              last: rows.at(-1)?.seq,
+            },
+          }),
+        )
 
         yield* Effect.forEach(
           batches,
@@ -759,14 +766,19 @@ export const layer = Layer.effect(
 
               if (response.status < 200 || response.status >= 300) {
                 const body = yield* response.text
-                log.error("session warp batch failed", {
-                  workspaceID: input.workspaceID,
-                  sessionID: input.sessionID,
-                  step: i + 1,
-                  total,
-                  status: response.status,
-                  body,
-                })
+                yield* Effect.logError("session warp batch failed").pipe(
+                  Effect.annotateLogs({
+                    service: "workspace-sync",
+                    ...{
+                      workspaceID: input.workspaceID,
+                      sessionID: input.sessionID,
+                      step: i + 1,
+                      total,
+                      status: response.status,
+                      body,
+                    },
+                  }),
+                )
                 return yield* new SessionWarpHttpError({
                   message: `Failed to warp session ${input.sessionID} into workspace ${workspaceID}: HTTP ${response.status} ${body}`,
                   workspaceID,
@@ -776,13 +788,18 @@ export const layer = Layer.effect(
                 })
               }
 
-              log.info("session warp batch posted", {
-                workspaceID: input.workspaceID,
-                sessionID: input.sessionID,
-                step: i + 1,
-                total,
-                status: response.status,
-              })
+              yield* Effect.logInfo("session warp batch posted").pipe(
+                Effect.annotateLogs({
+                  service: "workspace-sync",
+                  ...{
+                    workspaceID: input.workspaceID,
+                    sessionID: input.sessionID,
+                    step: i + 1,
+                    total,
+                    status: response.status,
+                  },
+                }),
+              )
             }),
           { discard: true },
         )
@@ -795,12 +812,17 @@ export const layer = Layer.effect(
         )
         if (response.status < 200 || response.status >= 300) {
           const body = yield* response.text
-          log.error("session warp steal failed", {
-            workspaceID: input.workspaceID,
-            sessionID: input.sessionID,
-            status: response.status,
-            body,
-          })
+          yield* Effect.logError("session warp steal failed").pipe(
+            Effect.annotateLogs({
+              service: "workspace-sync",
+              ...{
+                workspaceID: input.workspaceID,
+                sessionID: input.sessionID,
+                status: response.status,
+                body,
+              },
+            }),
+          )
           return yield* new SessionWarpHttpError({
             message: `Failed to steal session ${input.sessionID} into workspace ${workspaceID}: HTTP ${response.status} ${body}`,
             workspaceID,
@@ -810,19 +832,29 @@ export const layer = Layer.effect(
           })
         }
 
-        log.info("session warp complete", {
-          workspaceID: input.workspaceID,
-          sessionID: input.sessionID,
-          batches: total,
-        })
+        yield* Effect.logInfo("session warp complete").pipe(
+          Effect.annotateLogs({
+            service: "workspace-sync",
+            ...{
+              workspaceID: input.workspaceID,
+              sessionID: input.sessionID,
+              batches: total,
+            },
+          }),
+        )
       }).pipe(
         Effect.tapError((err) =>
           Effect.sync(() =>
-            log.error("session warp failed", {
-              workspaceID: input.workspaceID,
-              sessionID: input.sessionID,
-              error: errorData(err),
-            }),
+            Effect.logError("session warp failed").pipe(
+              Effect.annotateLogs({
+                service: "workspace-sync",
+                ...{
+                  workspaceID: input.workspaceID,
+                  sessionID: input.sessionID,
+                  error: errorData(err),
+                },
+              }),
+            ),
           ),
         ),
       )
@@ -848,7 +880,6 @@ export const layer = Layer.effect(
           WorkspaceAdapterRuntime.list(adapter).pipe(
             Effect.catchCause((error) =>
               Effect.sync(() => {
-                log.warn("workspace adapter list failed", { type, error })
                 return []
               }),
             ),
@@ -927,10 +958,7 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           yield* WorkspaceAdapterRuntime.remove(info)
         }),
-        () =>
-          Effect.sync(() => {
-            log.error("adapter not available when removing workspace", { type: row.type })
-          }),
+        () => Effect.sync(() => {}),
       )
 
       yield* db((db) => db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).run())
@@ -996,10 +1024,6 @@ export const layer = Layer.effect(
           Effect.catch((error) =>
             Effect.sync(() => {
               setStatus(workspace.id, "error")
-              log.warn("workspace sync failed to start", {
-                workspaceID: workspace.id,
-                error,
-              })
             }),
           ),
           Effect.forkDetach,

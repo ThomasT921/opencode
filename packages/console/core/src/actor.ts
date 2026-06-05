@@ -1,6 +1,5 @@
 import { Context } from "./context"
 import { UserRole } from "./schema/user.sql"
-import { Log } from "./util/log"
 
 export namespace Actor {
   interface Account {
@@ -38,8 +37,6 @@ export namespace Actor {
   const ctx = Context.create<Info>()
   export const use = ctx.use
 
-  const log = Log.create().tag("namespace", "actor")
-
   export function provide<R, T extends Info["type"]>(
     type: T,
     properties: Extract<Info, { type: T }>["properties"],
@@ -50,12 +47,7 @@ export namespace Actor {
         type,
         properties,
       } as any,
-      () => {
-        return Log.provide({ ...properties }, () => {
-          log.info("provided")
-          return cb()
-        })
-      },
+      cb,
     )
   }
 

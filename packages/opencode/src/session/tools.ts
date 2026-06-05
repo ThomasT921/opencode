@@ -16,11 +16,7 @@ import { MessageV2 } from "./message-v2"
 import * as Session from "./session"
 import { SessionProcessor } from "./processor"
 import { PartID } from "./schema"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { EffectBridge } from "@/effect/bridge"
-
-const log = EffectLogger.create({ service: "session.tools" })
-
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
   model: Provider.Model
@@ -30,7 +26,6 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   messages: MessageV2.WithParts[]
   promptOps: TaskPromptOps
 }) {
-  using _ = log.time("resolveTools")
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
   const plugin = yield* Plugin.Service

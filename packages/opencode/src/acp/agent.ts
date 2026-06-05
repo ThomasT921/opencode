@@ -33,7 +33,6 @@ import {
   type Usage,
 } from "@agentclientprotocol/sdk"
 
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { pathToFileURL } from "url"
 import { Filesystem } from "@/util/filesystem"
 import { Hash } from "@opencode-ai/core/util/hash"
@@ -57,9 +56,6 @@ type ModelOption = { modelId: string; name: string }
 const decodeTodos = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Array(Todo.Info)))
 
 const DEFAULT_VARIANT_VALUE = "default"
-
-const log = EffectLogger.create({ service: "acp-agent" })
-
 async function getContextLimit(
   sdk: OpencodeClient,
   providerID: ProviderID,
@@ -70,7 +66,6 @@ async function getContextLimit(
     .providers({ directory })
     .then((x) => x.data?.providers ?? [])
     .catch((error) => {
-      log.error("failed to get providers for context limit", { error })
       return []
     })
 
@@ -89,7 +84,6 @@ async function sendUsageUpdate(
     .messages({ sessionID, directory }, { throwOnError: true })
     .then((x) => x.data)
     .catch((error) => {
-      log.error("failed to fetch messages for usage update", { error })
       return undefined
     })
 
@@ -124,9 +118,7 @@ async function sendUsageUpdate(
         cost: { amount: totalCost, currency: "USD" },
       },
     })
-    .catch((error) => {
-      log.error("failed to send usage update", { error })
-    })
+    .catch((error) => {})
 }
 
 export function init({ sdk: _sdk }: { sdk: OpencodeClient }) {
@@ -166,7 +158,6 @@ export class Agent implements ACPAgent {
     this.eventStarted = true
     this.runEventSubscription().catch((error) => {
       if (this.eventAbort.signal.aborted) return
-      log.error("event subscription failed", { error })
     })
   }
 
@@ -180,9 +171,7 @@ export class Agent implements ACPAgent {
         if (this.eventAbort.signal.aborted) return
         const payload = event?.payload
         if (!payload) continue
-        await this.handleEvent(payload as Event).catch((error) => {
-          log.error("failed to handle event", { error, type: payload.type })
-        })
+        await this.handleEvent(payload as Event).catch((error) => {})
       }
     }
   }
@@ -213,11 +202,6 @@ export class Agent implements ACPAgent {
                 options: this.permissionOptions,
               })
               .catch(async (error) => {
-                log.error("failed to request permission from ACP", {
-                  error,
-                  permissionID: permission.id,
-                  sessionID: permission.sessionID,
-                })
                 await this.sdk.permission.reply({
                   requestID: permission.id,
                   reply: "reject",
@@ -258,9 +242,7 @@ export class Agent implements ACPAgent {
               directory,
             })
           })
-          .catch((error) => {
-            log.error("failed to handle permission", { error, permissionID: permission.id })
-          })
+          .catch((error) => {})
           .finally(() => {
             if (this.permissionQueues.get(permission.sessionID) === next) {
               this.permissionQueues.delete(permission.sessionID)
@@ -271,7 +253,6 @@ export class Agent implements ACPAgent {
       }
 
       case "message.part.updated": {
-        log.info("message part updated", { event: event.properties })
         const props = event.properties
         const part = props.part
         const session = this.sessionManager.tryGet(part.sessionID)
@@ -306,9 +287,7 @@ export class Agent implements ACPAgent {
                           rawInput: part.state.input,
                         },
                       })
-                      .catch((error) => {
-                        log.error("failed to send tool in_progress to ACP", { error })
-                      })
+                      .catch((error) => {})
                     return
                   }
                   this.shellSnapshots.set(part.callID, hash)
@@ -335,9 +314,7 @@ export class Agent implements ACPAgent {
                     ...(content.length > 0 && { content }),
                   },
                 })
-                .catch((error) => {
-                  log.error("failed to send tool in_progress to ACP", { error })
-                })
+                .catch((error) => {})
               return
 
             case "completed": {
@@ -365,11 +342,8 @@ export class Agent implements ACPAgent {
                         }),
                       },
                     })
-                    .catch((error) => {
-                      log.error("failed to send session update for todo", { error })
-                    })
+                    .catch((error) => {})
                 } else {
-                  log.error("failed to parse todo output", { error: parsedTodos.failure })
                 }
               }
 
@@ -387,9 +361,7 @@ export class Agent implements ACPAgent {
                     rawOutput: completedToolRawOutput(part),
                   },
                 })
-                .catch((error) => {
-                  log.error("failed to send tool completed to ACP", { error })
-                })
+                .catch((error) => {})
               return
             }
             case "error":
@@ -420,9 +392,7 @@ export class Agent implements ACPAgent {
                     },
                   },
                 })
-                .catch((error) => {
-                  log.error("failed to send tool error to ACP", { error })
-                })
+                .catch((error) => {})
               return
           }
         }
@@ -452,7 +422,6 @@ export class Agent implements ACPAgent {
           )
           .then((x) => x.data)
           .catch((error) => {
-            log.error("unexpected error when fetching message", { error })
             return undefined
           })
 
@@ -474,9 +443,7 @@ export class Agent implements ACPAgent {
                 },
               },
             })
-            .catch((error) => {
-              log.error("failed to send text delta to ACP", { error })
-            })
+            .catch((error) => {})
           return
         }
 
@@ -493,9 +460,7 @@ export class Agent implements ACPAgent {
                 },
               },
             })
-            .catch((error) => {
-              log.error("failed to send reasoning delta to ACP", { error })
-            })
+            .catch((error) => {})
         }
         return
       }
@@ -503,8 +468,6 @@ export class Agent implements ACPAgent {
   }
 
   async initialize(params: InitializeRequest): Promise<InitializeResponse> {
-    log.info("initialize", { protocolVersion: params.protocolVersion })
-
     const authMethod: AuthMethod = {
       description: "Run `opencode auth login` in the terminal",
       name: "Login with opencode",
@@ -561,9 +524,6 @@ export class Agent implements ACPAgent {
       // Store ACP session state
       const state = await this.sessionManager.create(params.cwd, params.mcpServers, model)
       const sessionId = state.id
-
-      log.info("creating_session", { sessionId, mcpServers: params.mcpServers.length })
-
       const load = await this.loadSessionMode({
         cwd: directory,
         mcpServers: params.mcpServers,
@@ -600,9 +560,6 @@ export class Agent implements ACPAgent {
 
       const messages = await this.loadSessionMessages(directory, sessionId)
       this.restoreSessionStateFromMessages(sessionId, messages)
-
-      log.info("load_session", { sessionId, mcpServers: params.mcpServers.length })
-
       const result = await this.loadSessionMode({
         cwd: directory,
         mcpServers: params.mcpServers,
@@ -610,7 +567,6 @@ export class Agent implements ACPAgent {
       })
 
       for (const msg of messages ?? []) {
-        log.debug("replay message", msg)
         await this.processMessage(msg)
       }
 
@@ -699,9 +655,6 @@ export class Agent implements ACPAgent {
 
       const messages = await this.loadSessionMessages(directory, sessionId)
       this.restoreSessionStateFromMessages(sessionId, messages)
-
-      log.info("fork_session", { sessionId, mcpServers: mcpServers.length })
-
       const mode = await this.loadSessionMode({
         cwd: directory,
         mcpServers,
@@ -709,7 +662,6 @@ export class Agent implements ACPAgent {
       })
 
       for (const msg of messages ?? []) {
-        log.debug("replay message", msg)
         await this.processMessage(msg)
       }
 
@@ -738,9 +690,6 @@ export class Agent implements ACPAgent {
 
       const messages = await this.loadSessionMessages(directory, sessionId, 20)
       this.restoreSessionStateFromMessages(sessionId, messages)
-
-      log.info("resume_session", { sessionId, mcpServers: mcpServers.length })
-
       const result = await this.loadSessionMode({
         cwd: directory,
         mcpServers,
@@ -773,17 +722,13 @@ export class Agent implements ACPAgent {
         },
         { throwOnError: true },
       )
-      .catch((error) => {
-        log.error("failed to abort session while closing ACP session", { error, sessionID: params.sessionId })
-      })
+      .catch((error) => {})
 
     this.permissionQueues.delete(params.sessionId)
-    log.info("close_session", { sessionId: params.sessionId })
     return {}
   }
 
   private async processMessage(message: SessionMessageResponse) {
-    log.debug("process message", message)
     if (message.info.role !== "assistant" && message.info.role !== "user") return
     const sessionId = message.info.sessionID
 
@@ -820,9 +765,7 @@ export class Agent implements ACPAgent {
                   ...(runningContent.length > 0 && { content: runningContent }),
                 },
               })
-              .catch((err) => {
-                log.error("failed to send tool in_progress to ACP", { error: err })
-              })
+              .catch((err) => {})
             break
           case "completed":
             this.toolStarts.delete(part.callID)
@@ -849,11 +792,8 @@ export class Agent implements ACPAgent {
                       }),
                     },
                   })
-                  .catch((err) => {
-                    log.error("failed to send session update for todo", { error: err })
-                  })
+                  .catch((err) => {})
               } else {
-                log.error("failed to parse todo output", { error: parsedTodos.failure })
               }
             }
 
@@ -871,9 +811,7 @@ export class Agent implements ACPAgent {
                   rawOutput: completedToolRawOutput(part),
                 },
               })
-              .catch((err) => {
-                log.error("failed to send tool completed to ACP", { error: err })
-              })
+              .catch((err) => {})
             break
           case "error":
             this.toolStarts.delete(part.callID)
@@ -903,9 +841,7 @@ export class Agent implements ACPAgent {
                   },
                 },
               })
-              .catch((err) => {
-                log.error("failed to send tool error to ACP", { error: err })
-              })
+              .catch((err) => {})
             break
         }
       } else if (part.type === "text") {
@@ -924,9 +860,7 @@ export class Agent implements ACPAgent {
                 },
               },
             })
-            .catch((err) => {
-              log.error("failed to send text to ACP", { error: err })
-            })
+            .catch((err) => {})
         }
       } else if (part.type === "file") {
         // Replay file attachments as appropriate ACP content blocks.
@@ -952,9 +886,7 @@ export class Agent implements ACPAgent {
                 content: { type: "resource_link", uri: url, name: filename, mimeType: mime },
               },
             })
-            .catch((err) => {
-              log.error("failed to send resource_link to ACP", { error: err })
-            })
+            .catch((err) => {})
         } else if (url.startsWith("data:")) {
           // Embedded content - parse data URL and send as appropriate block type
           const base64Match = url.match(/^data:([^;]+);base64,(.*)$/)
@@ -979,9 +911,7 @@ export class Agent implements ACPAgent {
                   },
                 },
               })
-              .catch((err) => {
-                log.error("failed to send image to ACP", { error: err })
-              })
+              .catch((err) => {})
           } else {
             // Non-image: text types get decoded, binary types stay as blob
             const isText = effectiveMime.startsWith("text/") || effectiveMime === "application/json"
@@ -1003,9 +933,7 @@ export class Agent implements ACPAgent {
                   content: { type: "resource", resource },
                 },
               })
-              .catch((err) => {
-                log.error("failed to send resource to ACP", { error: err })
-              })
+              .catch((err) => {})
           }
         }
         // URLs that don't match file:// or data: are skipped (unsupported)
@@ -1023,9 +951,7 @@ export class Agent implements ACPAgent {
                 },
               },
             })
-            .catch((err) => {
-              log.error("failed to send reasoning to ACP", { error: err })
-            })
+            .catch((err) => {})
         }
       }
     }
@@ -1055,9 +981,7 @@ export class Agent implements ACPAgent {
           rawInput: {},
         },
       })
-      .catch((error) => {
-        log.error("failed to send tool pending to ACP", { error })
-      })
+      .catch((error) => {})
   }
 
   private async loadAvailableModes(directory: string): Promise<ModeOption[]> {
@@ -1176,9 +1100,7 @@ export class Agent implements ACPAgent {
             },
             { throwOnError: true },
           )
-          .catch((error) => {
-            log.error("failed to add mcp server", { name: key, error })
-          })
+          .catch((error) => {})
       }),
     )
 
@@ -1400,9 +1322,6 @@ export class Agent implements ACPAgent {
           break
       }
     }
-
-    log.info("parts", { parts })
-
     const cmd = (() => {
       const text = parts
         .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -1521,7 +1440,6 @@ export class Agent implements ACPAgent {
       )
       .then((x) => x.data)
       .catch((error) => {
-        log.error("unexpected error when fetching message", { error })
         return undefined
       })
   }
@@ -1673,7 +1591,6 @@ async function defaultModel(config: ACPConfig, cwd?: string): Promise<{ provider
       return Provider.parseModel(cfg.model)
     })
     .catch((error) => {
-      log.error("failed to load user config for default model", { error })
       return undefined
     })
 
@@ -1681,7 +1598,6 @@ async function defaultModel(config: ACPConfig, cwd?: string): Promise<{ provider
     .providers({ directory }, { throwOnError: true })
     .then((x) => x.data?.providers ?? [])
     .catch((error) => {
-      log.error("failed to list providers for default model", { error })
       return []
     })
 
@@ -1728,7 +1644,6 @@ async function lastUsedModel(
     .list({ directory, roots: true, limit: 1 }, { throwOnError: true })
     .then((x) => x.data?.[0])
     .catch((error) => {
-      log.error("failed to list sessions for default model", { error })
       return undefined
     })
   if (!session) return
@@ -1737,7 +1652,6 @@ async function lastUsedModel(
     .messages({ sessionID: session.id, directory, limit: 20 }, { throwOnError: true })
     .then((x) => x.data?.findLast((message) => message.info.role === "user")?.info)
     .catch((error) => {
-      log.error("failed to load session messages for default model", { error, sessionID: session.id })
       return undefined
     })
   if (lastUser?.role !== "user") return
@@ -1792,7 +1706,6 @@ function parseUri(
 function getNewContent(fileOriginal: string, unifiedDiff: string): string | undefined {
   const result = applyPatch(fileOriginal, unifiedDiff)
   if (result === false) {
-    log.error("Failed to apply unified diff (context mismatch)")
     return undefined
   }
   return result

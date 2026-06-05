@@ -14,7 +14,6 @@ import {
 import path from "path"
 import { fileURLToPath } from "url"
 import { TuiConfig } from "@/cli/cmd/tui/config/tui"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { errorData, errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
 import { resolveAttentionSoundPaths } from "../config/tui-schema"
@@ -116,8 +115,6 @@ type RuntimeState = {
   pending: Map<string, ConfigPlugin.Origin>
   dispose_timeout_ms: number
 }
-
-const log = EffectLogger.create({ service: "tui.plugin" })
 const DISPOSE_TIMEOUT_MS = 5000
 const KV_KEY = "plugin_enabled"
 const EMPTY_TUI: TuiPluginModule = {
@@ -126,19 +123,16 @@ const EMPTY_TUI: TuiPluginModule = {
 
 function fail(message: string, data: Record<string, unknown>) {
   if (!("error" in data)) {
-    log.error(message, data)
     console.error(`[tui.plugin] ${message}`, data)
     return
   }
 
   const text = `${message}: ${errorMessage(data.error)}`
   const next = { ...data, error: errorData(data.error) }
-  log.error(text, next)
   console.error(`[tui.plugin] ${text}`, next)
 }
 
 function warn(message: string, data: Record<string, unknown>) {
-  log.warn(message, data)
   console.warn(`[tui.plugin] ${message}`, data)
 }
 
@@ -273,15 +267,7 @@ function createThemeInstaller(
     await Flock.withLock(`tui-theme:${dest}`, async () => {
       const save = async () => {
         plugin.themes[name] = info
-        await PluginMeta.setTheme(plugin.id, name, info).catch((error) => {
-          log.warn("failed to track tui plugin theme", {
-            path: spec,
-            id: plugin.id,
-            theme: src,
-            dest,
-            error,
-          })
-        })
+        await PluginMeta.setTheme(plugin.id, name, info).catch((error) => {})
       }
 
       const exists = hasTheme(name)
@@ -297,7 +283,6 @@ function createThemeInstaller(
       }
 
       const text = await Filesystem.readText(src).catch((error) => {
-        log.warn("failed to read tui plugin theme", { path: spec, theme: src, error })
         return
       })
       if (text === undefined) return
@@ -306,27 +291,21 @@ function createThemeInstaller(
       const data = await Promise.resolve(text)
         .then((x) => JSON.parse(x))
         .catch((error) => {
-          log.warn("failed to parse tui plugin theme", { path: spec, theme: src, error })
           return fail
         })
       if (data === fail) return
 
       if (!isTheme(data)) {
-        log.warn("invalid tui plugin theme", { path: spec, theme: src })
         return
       }
 
       if (exists || !(await Filesystem.exists(dest))) {
-        await Filesystem.write(dest, text).catch((error) => {
-          log.warn("failed to persist tui plugin theme", { path: spec, theme: src, dest, error })
-        })
+        await Filesystem.write(dest, text).catch((error) => {})
       }
 
       upsertTheme(name, data)
       await save()
-    }).catch((error) => {
-      log.warn("failed to lock tui plugin theme install", { path: spec, theme: src, dest, error })
-    })
+    }).catch((error) => {})
   }
 }
 
@@ -689,9 +668,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
     items: list,
     kind: "tui",
     wait: async () => {
-      await wait().catch((error) => {
-        log.warn("failed waiting for tui plugin dependencies", { error })
-      })
+      await wait().catch((error) => {})
     },
     finish: async (loaded, origin, retry) => {
       const mod = await Promise.resolve()
@@ -762,9 +739,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
       }
     },
     report: {
-      start(candidate, retry) {
-        log.info("loading tui plugin", { path: candidate.plan.spec, retry })
-      },
+      start(candidate, retry) {},
       missing(candidate, retry, message) {
         warn("tui plugin has no entrypoint", { path: candidate.plan.spec, retry, message })
       },
@@ -798,7 +773,6 @@ async function addExternalPluginEntries(state: RuntimeState, ready: PluginLoad[]
       id: item.id,
     })),
   ).catch((error) => {
-    log.warn("failed to track tui plugins", { error })
     return undefined
   })
 
@@ -809,14 +783,6 @@ async function addExternalPluginEntries(state: RuntimeState, ready: PluginLoad[]
     if (!entry) continue
     const hit = meta?.[i]
     if (hit && hit.state !== "same") {
-      log.info("tui plugin metadata updated", {
-        path: entry.spec,
-        retry: entry.retry,
-        state: hit.state,
-        source: hit.entry.source,
-        version: hit.entry.version,
-        modified: hit.entry.modified,
-      })
     }
 
     const info = createMeta(entry.source, entry.spec, entry.target, hit, entry.id)
@@ -1093,11 +1059,9 @@ async function load(input: { api: Api; config: TuiConfig.Resolved; dispose?: () 
     )
     const records = Flag.OPENCODE_PURE ? [] : (config.plugin_origins ?? [])
     if (Flag.OPENCODE_PURE && config.plugin_origins?.length) {
-      log.info("skipping external tui plugins in pure mode", { count: config.plugin_origins.length })
     }
 
     for (const item of internalTuiPlugins(flags)) {
-      log.info("loading internal tui plugin", { id: item.id })
       const entry = loadInternalPlugin(item)
       const meta = createMeta(entry.source, entry.spec, entry.target, undefined, entry.id)
       addPluginEntry(next, {

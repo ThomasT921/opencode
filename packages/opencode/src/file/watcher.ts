@@ -14,11 +14,8 @@ import { lazy } from "@/util/lazy"
 import { Config } from "@/config/config"
 import { FileIgnore } from "./ignore"
 import { Protected } from "./protected"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 
 declare const OPENCODE_LIBC: string | undefined
-
-const log = EffectLogger.create({ service: "file.watcher" })
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
 export const Event = {
@@ -38,7 +35,6 @@ const watcher = lazy((): typeof import("@parcel/watcher") | undefined => {
     )
     return createWrapper(binding) as typeof import("@parcel/watcher")
   } catch (error) {
-    log.error("failed to load watcher binding", { error })
     return
   }
 })
@@ -77,18 +73,30 @@ export const layer = Layer.effect(
 
           const ctx = yield* InstanceState.context
 
-          log.info("init", { directory: ctx.directory })
+          yield* Effect.logInfo("init").pipe(
+            Effect.annotateLogs({ service: "file.watcher", ...{ directory: ctx.directory } }),
+          )
 
           const backend = getBackend()
           if (!backend) {
-            log.error("watcher backend not supported", { directory: ctx.directory, platform: process.platform })
+            yield* Effect.logError("watcher backend not supported").pipe(
+              Effect.annotateLogs({
+                service: "file.watcher",
+                ...{ directory: ctx.directory, platform: process.platform },
+              }),
+            )
             return
           }
 
           const w = watcher()
           if (!w) return
 
-          log.info("watcher backend", { directory: ctx.directory, platform: process.platform, backend })
+          yield* Effect.logInfo("watcher backend").pipe(
+            Effect.annotateLogs({
+              service: "file.watcher",
+              ...{ directory: ctx.directory, platform: process.platform, backend },
+            }),
+          )
           const bridge = yield* EffectBridge.make()
           const subs: ParcelWatcher.AsyncSubscription[] = []
           yield* Effect.addFinalizer(() =>
@@ -112,7 +120,6 @@ export const layer = Layer.effect(
             }).pipe(
               Effect.timeout(SUBSCRIBE_TIMEOUT_MS),
               Effect.catchCause((cause) => {
-                log.error("failed to subscribe", { dir, cause: Cause.pretty(cause) })
                 pending.then((s) => s.unsubscribe()).catch(() => {})
                 return Effect.void
               }),
@@ -148,7 +155,6 @@ export const layer = Layer.effect(
           }
         },
         Effect.catchCause((cause) => {
-          log.error("failed to init watcher service", { cause: Cause.pretty(cause) })
           return Effect.void
         }),
       ),

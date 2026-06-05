@@ -7,15 +7,11 @@ import { MessageID, SessionID } from "@/session/schema"
 import { PermissionTable } from "@/session/session.sql"
 import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import os from "os"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { PermissionID } from "./schema"
-
-const log = EffectLogger.create({ service: "permission" })
-
 export const Action = PermissionV2.Action.annotate({ identifier: "PermissionAction" })
 export type Action = Schema.Schema.Type<typeof Action>
 
@@ -175,7 +171,9 @@ export const layer = Layer.effect(
 
       for (const pattern of request.patterns) {
         const rule = evaluate(request.permission, pattern, ruleset, approved)
-        log.info("evaluated", { permission: request.permission, pattern, action: rule })
+        yield* Effect.logInfo("evaluated").pipe(
+          Effect.annotateLogs({ service: "permission", ...{ permission: request.permission, pattern, action: rule } }),
+        )
         if (rule.action === "deny") {
           return yield* new DeniedError({
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
@@ -197,7 +195,9 @@ export const layer = Layer.effect(
         always: request.always,
         tool: request.tool,
       }
-      log.info("asking", { id, permission: info.permission, patterns: info.patterns })
+      yield* Effect.logInfo("asking").pipe(
+        Effect.annotateLogs({ service: "permission", ...{ id, permission: info.permission, patterns: info.patterns } }),
+      )
 
       const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
       pending.set(id, { info, deferred })

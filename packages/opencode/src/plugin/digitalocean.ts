@@ -1,12 +1,9 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { createServer } from "http"
 import open from "open"
-
-const log = EffectLogger.create({ service: "plugin.digitalocean" })
-
+import { Effect } from "effect"
 const DO_OAUTH_CLIENT_ID = "b1a6c5158156caac821fd1b30253ca8acb52454a48fa744420e41889cb589f82"
 const DO_AUTHORIZE_URL = "https://cloud.digitalocean.com/v1/oauth/authorize"
 const DO_API_BASE = "https://api.digitalocean.com"
@@ -188,7 +185,6 @@ async function startOAuthServer(): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     oauthServer!.listen(OAUTH_PORT, () => {
-      log.info("digitalocean oauth server started", { port: OAUTH_PORT })
       resolve()
     })
     oauthServer!.on("error", reject)
@@ -197,7 +193,9 @@ async function startOAuthServer(): Promise<void> {
 
 function stopOAuthServer() {
   if (!oauthServer) return
-  oauthServer.close(() => log.info("digitalocean oauth server stopped"))
+  oauthServer.close(() =>
+    Effect.logInfo("digitalocean oauth server stopped").pipe(Effect.annotateLogs({ service: "plugin.digitalocean" })),
+  )
   oauthServer = undefined
 }
 
@@ -315,11 +313,13 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
                 path: { id: "digitalocean" },
                 body: { type: "api", key: ctx.auth.key, metadata: updated },
               })
-              .catch((err) => log.warn("failed to persist refreshed routers", { error: err }))
+              .catch((err) =>
+                Effect.logWarning("failed to persist refreshed routers").pipe(
+                  Effect.annotateLogs({ service: "plugin.digitalocean", ...{ error: err } }),
+                ),
+              )
           } else if (result.status === 401 || result.status === 403) {
-            log.warn("digitalocean oauth bearer rejected; using cached routers", { status: result.status })
           } else if (result.status !== 0) {
-            log.warn("digitalocean router refresh failed", { status: result.status })
           }
         }
 
@@ -355,7 +355,6 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
                   const routerResult = await listRouters(tokens.access_token)
                   const routers = routerResult.ok ? routerResult.routers : []
                   if (!routerResult.ok) {
-                    log.warn("digitalocean initial router fetch failed", { status: routerResult.status })
                   }
                   return {
                     type: "success" as const,
@@ -372,7 +371,6 @@ export async function DigitalOceanAuthPlugin(input: PluginInput): Promise<Hooks>
                     },
                   }
                 } catch (err) {
-                  log.error("digitalocean oauth callback failed", { error: err })
                   return { type: "failed" as const }
                 } finally {
                   stopOAuthServer()

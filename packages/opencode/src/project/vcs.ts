@@ -5,9 +5,6 @@ import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect/instance-state"
 import { FileWatcher } from "@/file/watcher"
 import { Git } from "@/git"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
-
-const log = EffectLogger.create({ service: "vcs" })
 const PATCH_CONTEXT_LINES = 2_147_483_647
 const MAX_PATCH_BYTES = 10_000_000
 const MAX_TOTAL_PATCH_BYTES = 10_000_000
@@ -107,7 +104,10 @@ const batchPatches = Effect.fnUntraced(function* (
     context: options?.context ?? PATCH_CONTEXT_LINES,
     maxOutputBytes: MAX_TOTAL_PATCH_BYTES,
   })
-  if (result.truncated) log.warn("batched patch exceeded byte limit", { max: MAX_TOTAL_PATCH_BYTES })
+  if (result.truncated)
+    yield* Effect.logWarning("batched patch exceeded byte limit").pipe(
+      Effect.annotateLogs({ service: "vcs", ...{ max: MAX_TOTAL_PATCH_BYTES } }),
+    )
 
   return {
     patches: splitGitPatch(result).reduce((acc, patch, index) => {
@@ -139,13 +139,15 @@ const nativePatch = Effect.fnUntraced(function* (
         })
   if (!result.truncated && result.text) return result.text
 
-  if (result.truncated) log.warn("patch exceeded byte limit", { file: item.file, max: MAX_PATCH_BYTES })
+  if (result.truncated)
+    yield* Effect.logWarning("patch exceeded byte limit").pipe(
+      Effect.annotateLogs({ service: "vcs", ...{ file: item.file, max: MAX_PATCH_BYTES } }),
+    )
   return emptyPatch(item.file)
 })
 
 const totalPatch = (file: string, patch: string, total: number) => {
   if (total + Buffer.byteLength(patch) <= MAX_TOTAL_PATCH_BYTES) return { patch, capped: false }
-  log.warn("total patch budget exceeded", { file, max: MAX_TOTAL_PATCH_BYTES })
   return { patch: emptyPatch(file), capped: true }
 }
 
@@ -325,7 +327,9 @@ export const layer: Layer.Layer<Service, never, Git.Service | Bus.Service> = Lay
           concurrency: 2,
         })
         const value = { current, root }
-        log.info("initialized", { branch: value.current, default_branch: value.root?.name })
+        yield* Effect.logInfo("initialized").pipe(
+          Effect.annotateLogs({ service: "vcs", ...{ branch: value.current, default_branch: value.root?.name } }),
+        )
 
         yield* (yield* bus.subscribe(FileWatcher.Event.Updated)).pipe(
           Stream.filter((evt) => evt.properties.file.endsWith("HEAD")),
@@ -333,7 +337,9 @@ export const layer: Layer.Layer<Service, never, Git.Service | Bus.Service> = Lay
             Effect.gen(function* () {
               const next = yield* get()
               if (next !== value.current) {
-                log.info("branch changed", { from: value.current, to: next })
+                yield* Effect.logInfo("branch changed").pipe(
+                  Effect.annotateLogs({ service: "vcs", ...{ from: value.current, to: next } }),
+                )
                 value.current = next
                 yield* bus.publish(Event.BranchUpdated, { branch: next })
               }

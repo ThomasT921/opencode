@@ -2,7 +2,6 @@ import path from "path"
 import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
@@ -76,10 +75,6 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
-
-const log = EffectLogger.create({ service: "session.prompt" })
-const elog = EffectLogger.create({ service: "session.prompt" })
-
 function isOrphanedInterruptedTool(part: MessageV2.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
@@ -137,7 +132,7 @@ export const layer = Layer.effect(
     })
 
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
-      yield* elog.info("cancel", { sessionID })
+      yield* Effect.logInfo("cancel").pipe(Effect.annotateLogs({ service: "session.prompt", ...{ sessionID } }))
       yield* state.cancel(sessionID)
     })
 
@@ -296,7 +291,13 @@ export const layer = Layer.effect(
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
-        .pipe(Effect.catchCause((cause) => elog.error("failed to generate title", { error: Cause.squash(cause) })))
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("failed to generate title").pipe(
+              Effect.annotateLogs({ service: "session.prompt", ...{ error: Cause.squash(cause) } }),
+            ),
+          ),
+        )
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -398,7 +399,6 @@ export const layer = Layer.effect(
           Effect.catchCause((cause) => {
             const defect = Cause.squash(cause)
             error = defect instanceof Error ? defect : new Error(String(defect))
-            log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
             return Effect.void
           }),
           Effect.onInterrupt(() =>
@@ -794,7 +794,9 @@ export const layer = Layer.effect(
         if (part.type === "file") {
           if (part.source?.type === "resource") {
             const { clientName, uri } = part.source
-            log.info("mcp resource", { clientName, uri, mime: part.mime })
+            yield* Effect.logInfo("mcp resource").pipe(
+              Effect.annotateLogs({ service: "session.prompt", ...{ clientName, uri, mime: part.mime } }),
+            )
             const pieces: Draft<MessageV2.Part>[] = [
               {
                 messageID: info.id,
@@ -832,7 +834,9 @@ export const layer = Layer.effect(
               pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
             } else {
               const error = Cause.squash(exit.cause)
-              log.error("failed to read MCP resource", { error, clientName, uri })
+              yield* Effect.logError("failed to read MCP resource").pipe(
+                Effect.annotateLogs({ service: "session.prompt", ...{ error, clientName, uri } }),
+              )
               const message = error instanceof Error ? error.message : String(error)
               pieces.push({
                 messageID: info.id,
@@ -868,7 +872,9 @@ export const layer = Layer.effect(
               }
               break
             case "file:": {
-              log.info("file", { mime: part.mime })
+              yield* Effect.logInfo("file").pipe(
+                Effect.annotateLogs({ service: "session.prompt", ...{ mime: part.mime } }),
+              )
               const filepath = fileURLToPath(part.url)
               const referenceContext = yield* referenceContextFromFilePart(part, filepath)
               const mime = (yield* fsys.isDir(filepath)) ? "application/x-directory" : part.mime
@@ -955,7 +961,9 @@ export const layer = Layer.effect(
                   }
                 } else {
                   const error = Cause.squash(exit.cause)
-                  log.error("failed to read file", { error })
+                  yield* Effect.logError("failed to read file").pipe(
+                    Effect.annotateLogs({ service: "session.prompt", ...{ error } }),
+                  )
                   const message = error instanceof Error ? error.message : String(error)
                   yield* bus.publish(Session.Event.Error, {
                     sessionID: input.sessionID,
@@ -977,7 +985,9 @@ export const layer = Layer.effect(
                 const exit = yield* execRead(args).pipe(Effect.exit)
                 if (Exit.isFailure(exit)) {
                   const error = Cause.squash(exit.cause)
-                  log.error("failed to read directory", { error })
+                  yield* Effect.logError("failed to read directory").pipe(
+                    Effect.annotateLogs({ service: "session.prompt", ...{ error } }),
+                  )
                   const message = error instanceof Error ? error.message : String(error)
                   yield* bus.publish(Session.Event.Error, {
                     sessionID: input.sessionID,
@@ -1094,26 +1104,22 @@ export const layer = Layer.effect(
 
       const parsed = decodeMessageInfo(info, { errors: "all", propertyOrder: "original" })
       if (Exit.isFailure(parsed)) {
-        log.error("invalid user message before save", {
-          sessionID: input.sessionID,
-          messageID: info.id,
-          agent: info.agent,
-          model: info.model,
-          cause: Cause.pretty(parsed.cause),
-        })
+        yield* Effect.logError("invalid user message before save").pipe(
+          Effect.annotateLogs({
+            service: "session.prompt",
+            ...{
+              sessionID: input.sessionID,
+              messageID: info.id,
+              agent: info.agent,
+              model: info.model,
+              cause: Cause.pretty(parsed.cause),
+            },
+          }),
+        )
       }
       parts.forEach((part, index) => {
         const p = decodeMessagePart(part, { errors: "all", propertyOrder: "original" })
         if (Exit.isSuccess(p)) return
-        log.error("invalid user part before save", {
-          sessionID: input.sessionID,
-          messageID: info.id,
-          partID: part.id,
-          partType: part.type,
-          index,
-          cause: Cause.pretty(p.cause),
-          part,
-        })
       })
 
       yield* sessions.updateMessage(info)
@@ -1243,14 +1249,13 @@ export const layer = Layer.effect(
     const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
         const ctx = yield* InstanceState.context
-        const slog = elog.with({ sessionID })
         let structured: unknown
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
-          yield* slog.info("loop", { step })
+          yield* Effect.logInfo("loop").pipe(Effect.annotateLogs({ service: "session.prompt", sessionID, step }))
 
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID)
 
@@ -1279,13 +1284,17 @@ export const layer = Layer.effect(
               (part): part is MessageV2.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
             )
             if (orphan) {
-              yield* slog.warn("loop exit with orphaned interrupted tool", {
-                messageID: lastAssistant.id,
-                tool: orphan.tool,
-                callID: orphan.callID,
-              })
+              yield* Effect.logWarning("loop exit with orphaned interrupted tool").pipe(
+                Effect.annotateLogs({
+                  service: "session.prompt",
+                  sessionID,
+                  messageID: lastAssistant.id,
+                  tool: orphan.tool,
+                  callID: orphan.callID,
+                }),
+              )
             }
-            yield* slog.info("exiting loop")
+            yield* Effect.logInfo("exiting loop").pipe(Effect.annotateLogs({ service: "session.prompt", sessionID }))
             break
           }
 
@@ -1510,7 +1519,12 @@ export const layer = Layer.effect(
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
-      yield* elog.info("command", { sessionID: input.sessionID, command: input.command, agent: input.agent })
+      yield* Effect.logInfo("command").pipe(
+        Effect.annotateLogs({
+          service: "session.prompt",
+          ...{ sessionID: input.sessionID, command: input.command, agent: input.agent },
+        }),
+      )
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
         const available = (yield* commands.list()).map((c) => c.name)

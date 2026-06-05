@@ -3,16 +3,12 @@ export * as ConfigAgent from "./agent"
 import path from "path"
 import { Exit, Schema, SchemaGetter } from "effect"
 import { PositiveInt } from "@opencode-ai/core/schema"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Glob } from "@opencode-ai/core/util/glob"
 import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigModelID } from "./model-id"
 import { ConfigParse } from "./parse"
 import { ConfigPermission } from "./permission"
-
-const log = EffectLogger.create({ service: "config" })
-
 const Color = Schema.Union([
   Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/)),
   Schema.Literals(["primary", "secondary", "accent", "success", "warning", "error", "info"]),
@@ -112,7 +108,6 @@ export async function load(dir: string) {
     symlink: true,
   })) {
     const md = await ConfigMarkdown.parse(item).catch((err) => {
-      log.error("failed to load agent", { agent: item, err })
       return undefined
     })
     if (!md) continue
@@ -138,7 +133,6 @@ export async function loadMode(dir: string) {
     symlink: true,
   })) {
     const md = await ConfigMarkdown.parse(item).catch((err) => {
-      log.error("failed to load mode", { mode: item, err })
       return undefined
     })
     if (!md) continue

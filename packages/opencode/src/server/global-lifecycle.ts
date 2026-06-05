@@ -1,11 +1,7 @@
 import { GlobalBus } from "@/bus/global"
 import { InstanceStore } from "@/project/instance-store"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Effect } from "effect"
 import { Event } from "./event"
-
-const log = EffectLogger.create({ service: "server" })
-
 export const emitGlobalDisposed = Effect.sync(() =>
   GlobalBus.emit("event", {
     directory: "global",
@@ -21,13 +17,7 @@ export const disposeAllInstancesAndEmitGlobalDisposed = Effect.fn("Server.dispos
     const store = yield* InstanceStore.Service
     yield* Effect.gen(function* () {
       yield* options?.swallowErrors
-        ? store.disposeAll().pipe(
-            Effect.catchCause((cause) =>
-              Effect.sync(() => {
-                log.warn("global disposal failed", { cause })
-              }),
-            ),
-          )
+        ? store.disposeAll().pipe(Effect.catchCause((cause) => Effect.sync(() => {})))
         : store.disposeAll()
       yield* emitGlobalDisposed
     }).pipe(Effect.uninterruptible)

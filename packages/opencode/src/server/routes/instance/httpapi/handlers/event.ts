@@ -1,14 +1,10 @@
 import { Bus } from "@/bus"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Effect } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
-
-const log = EffectLogger.create({ service: "server" })
-
 function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
@@ -32,14 +28,14 @@ function eventResponse(bus: Bus.Interface) {
       Stream.map(() => ({ id: Bus.createID(), type: "server.heartbeat", properties: {} })),
     )
 
-    log.info("event connected")
+    yield* Effect.logInfo("event connected").pipe(Effect.annotateLogs({ service: "server" }))
     return HttpServerResponse.stream(
       Stream.make({ id: Bus.createID(), type: "server.connected", properties: {} }).pipe(
         Stream.concat(events.pipe(Stream.merge(heartbeat, { haltStrategy: "left" }))),
         Stream.map(eventData),
         Stream.pipeThroughChannel(Sse.encode()),
         Stream.encodeText,
-        Stream.ensuring(Effect.sync(() => log.info("event disconnected"))),
+        Stream.ensuring(Effect.logInfo("event disconnected").pipe(Effect.annotateLogs({ service: "server" }))),
       ),
       {
         contentType: "text/event-stream",

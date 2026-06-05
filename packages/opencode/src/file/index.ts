@@ -12,7 +12,6 @@ import ignore from "ignore"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { containsPath } from "../project/instance-context"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Protected } from "./protected"
 import { Ripgrep } from "./ripgrep"
 import { NonNegativeInt, type DeepMutable } from "@opencode-ai/core/schema"
@@ -69,9 +68,6 @@ export const Event = {
     }),
   ),
 }
-
-const log = EffectLogger.create({ service: "file" })
-
 const binary = new Set([
   "exe",
   "dll",
@@ -284,7 +280,6 @@ const getImageMimeType = (file: string) => mime[ext(file)] || "image/" + ext(fil
 
 function shouldEncode(mimeType: string) {
   const type = mimeType.toLowerCase()
-  log.debug("shouldEncode", { type })
   if (!type) return false
   if (type.startsWith("text/")) return false
   if (type.includes("charset=")) return false
@@ -499,7 +494,6 @@ export const layer = Layer.effect(
     })
 
     const read: Interface["read"] = Effect.fn("File.read")(function* (file: string) {
-      using _ = log.time("read", { file })
       const ctx = yield* InstanceState.context
       const full = path.join(ctx.directory, file)
 
@@ -621,7 +615,7 @@ export const layer = Layer.effect(
       const query = input.query.trim()
       const limit = input.limit ?? 100
       const kind = input.type ?? (input.dirs === false ? "file" : "all")
-      log.info("search", { query, kind })
+      yield* Effect.logInfo("search").pipe(Effect.annotateLogs({ service: "file", ...{ query, kind } }))
 
       const preferHidden = query.startsWith(".") || query.includes("/.")
 
@@ -636,11 +630,13 @@ export const layer = Layer.effect(
       const sorted = fuzzysort.go(query, items, { limit: searchLimit }).map((item) => item.target)
       const output = kind === "directory" ? sortHiddenLast(sorted, preferHidden).slice(0, limit) : sorted
 
-      log.info("search", { query, kind, results: output.length })
+      yield* Effect.logInfo("search").pipe(
+        Effect.annotateLogs({ service: "file", ...{ query, kind, results: output.length } }),
+      )
       return output
     })
 
-    log.info("init")
+    yield* Effect.logInfo("init").pipe(Effect.annotateLogs({ service: "file" }))
     return Service.of({ init, status, read, list, search })
   }),
 )

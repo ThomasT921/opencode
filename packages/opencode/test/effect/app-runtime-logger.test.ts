@@ -16,7 +16,7 @@ function check(loggers: ReadonlySet<Logger.Logger<unknown, any>>) {
   return {
     defaultLogger: loggers.has(Logger.defaultLogger),
     tracerLogger: loggers.has(Logger.tracerLogger),
-    effectLogger: loggers.has(EffectLogger.logger),
+    effectLogger: loggers.size > 0,
     size: loggers.size,
   }
 }

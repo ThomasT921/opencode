@@ -24,7 +24,6 @@ import type { SQL } from "drizzle-orm"
 import { PartTable, SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage/storage"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
 import { InstanceState } from "@/effect/instance-state"
@@ -40,9 +39,6 @@ import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
 import { NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-
-const log = EffectLogger.create({ service: "session" })
-
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
 
@@ -552,7 +548,7 @@ export const layer: Layer.Layer<
           updated: Date.now(),
         },
       }
-      log.info("created", result)
+      yield* Effect.logInfo("created").pipe(Effect.annotateLogs({ service: "session", ...result }))
 
       yield* sync.run(Event.Created, { sessionID: result.id, info: result })
 
@@ -611,7 +607,7 @@ export const layer: Layer.Layer<
         yield* sync.run(Event.Deleted, { sessionID, info: session }, { publish: hasInstance })
         yield* sync.remove(sessionID)
       } catch (e) {
-        log.error(e)
+        yield* Effect.logError(e).pipe(Effect.annotateLogs({ service: "session" }))
       }
     })
 

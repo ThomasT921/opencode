@@ -1,6 +1,5 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import * as LSPClient from "./client"
 import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
@@ -13,9 +12,6 @@ import { InstanceState } from "@/effect/instance-state"
 import { containsPath } from "@/project/instance-context"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-
-const log = EffectLogger.create({ service: "lsp" })
-
 export const Event = {
   Updated: BusEvent.define("lsp.updated", Schema.Struct({})),
 }
@@ -101,7 +97,6 @@ const kinds = [
 const filterExperimentalServers = (servers: Record<string, LSPServer.Info>, flags: RuntimeFlags.Info) => {
   if (flags.experimentalLspTy) {
     if (servers["pyright"]) {
-      log.info("LSP server pyright is disabled because OPENCODE_EXPERIMENTAL_LSP_TY is enabled")
       delete servers["pyright"]
     }
   } else {
@@ -152,7 +147,7 @@ export const layer = Layer.effect(
         const servers: Record<string, LSPServer.Info> = {}
 
         if (!cfg.lsp) {
-          log.info("all LSPs are disabled")
+          yield* Effect.logInfo("all LSPs are disabled").pipe(Effect.annotateLogs({ service: "lsp" }))
         } else {
           for (const server of Object.values(LSPServer)) {
             servers[server.id] = server
@@ -164,7 +159,7 @@ export const layer = Layer.effect(
             for (const [name, item] of Object.entries(cfg.lsp)) {
               const existing = servers[name]
               if (item.disabled) {
-                log.info(`LSP server ${name} is disabled`)
+                yield* Effect.logInfo(`LSP server ${name} is disabled`).pipe(Effect.annotateLogs({ service: "lsp" }))
                 delete servers[name]
                 continue
               }
@@ -184,11 +179,16 @@ export const layer = Layer.effect(
             }
           }
 
-          log.info("enabled LSP servers", {
-            serverIds: Object.values(servers)
-              .map((server) => server.id)
-              .join(", "),
-          })
+          yield* Effect.logInfo("enabled LSP servers").pipe(
+            Effect.annotateLogs({
+              service: "lsp",
+              ...{
+                serverIds: Object.values(servers)
+                  .map((server) => server.id)
+                  .join(", "),
+              },
+            }),
+          )
         }
 
         const s: State = {
@@ -225,13 +225,10 @@ export const layer = Layer.effect(
             })
             .catch((err) => {
               s.broken.add(key)
-              log.error(`Failed to spawn LSP server ${server.id}`, { error: err })
               return undefined
             })
 
           if (!handle) return undefined
-          log.info("spawned lsp server", { serverID: server.id, root })
-
           const client = await LSPClient.create({
             serverID: server.id,
             server: handle,
@@ -241,7 +238,6 @@ export const layer = Layer.effect(
           }).catch(async (err) => {
             s.broken.add(key)
             await Process.stop(handle.process)
-            log.error(`Failed to initialize LSP client ${server.id}`, { error: err })
             return undefined
           })
 
@@ -344,7 +340,7 @@ export const layer = Layer.effect(
     })
 
     const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, diagnostics?: "document" | "full") {
-      log.info("touching file", { file: input })
+      yield* Effect.logInfo("touching file").pipe(Effect.annotateLogs({ service: "lsp", ...{ file: input } }))
       const clients = yield* getClients(input)
       yield* Effect.promise(() =>
         Promise.all(
@@ -359,9 +355,7 @@ export const layer = Layer.effect(
               after,
             })
           }),
-        ).catch((err) => {
-          log.error("failed to touch file", { err, file: input })
-        }),
+        ).catch((err) => {}),
       )
     })
 

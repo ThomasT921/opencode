@@ -12,12 +12,9 @@ import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Glob } from "@opencode-ai/core/util/glob"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Discovery } from "./discovery"
 import CUSTOMIZE_OPENCODE_SKILL_BODY from "./prompt/customize-opencode.md" with { type: "text" }
 import { isRecord } from "@/util/record"
-
-const log = EffectLogger.create({ service: "skill" })
 const CLAUDE_EXTERNAL_DIR = ".claude"
 const AGENTS_EXTERNAL_DIR = ".agents"
 const EXTERNAL_SKILL_PATTERN = "skills/**/SKILL.md"
@@ -113,7 +110,9 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
           : `Failed to parse skill ${match}`
         const { Session } = yield* Effect.promise(() => import("@/session/session"))
         yield* bus.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() })
-        log.error("failed to load skill", { skill: match, err })
+        yield* Effect.logError("failed to load skill").pipe(
+          Effect.annotateLogs({ service: "skill", ...{ skill: match, err } }),
+        )
         return undefined
       }),
     ),
@@ -124,11 +123,16 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
   if (!isSkillFrontmatter(md.data)) return
 
   if (state.skills[md.data.name]) {
-    log.warn("duplicate skill name", {
-      name: md.data.name,
-      existing: state.skills[md.data.name].location,
-      duplicate: match,
-    })
+    yield* Effect.logWarning("duplicate skill name").pipe(
+      Effect.annotateLogs({
+        service: "skill",
+        ...{
+          name: md.data.name,
+          existing: state.skills[md.data.name].location,
+          duplicate: match,
+        },
+      }),
+    )
   }
 
   state.dirs.add(path.dirname(match))
@@ -159,7 +163,6 @@ const scan = Effect.fnUntraced(function* (
   }).pipe(
     Effect.catch((error) => {
       if (!opts?.scope) return Effect.die(error)
-      log.error(`failed to scan ${opts.scope} skills`, { dir: root, error })
       return Effect.succeed([] as string[])
     }),
   )
@@ -212,7 +215,7 @@ const discoverSkills = Effect.fnUntraced(function* (
     const expanded = item.startsWith("~/") ? path.join(global.home, item.slice(2)) : item
     const dir = path.isAbsolute(expanded) ? expanded : path.join(directory, expanded)
     if (!(yield* fsys.isDir(dir))) {
-      log.warn("skill path not found", { path: dir })
+      yield* Effect.logWarning("skill path not found").pipe(Effect.annotateLogs({ service: "skill", ...{ path: dir } }))
       continue
     }
 
@@ -238,7 +241,9 @@ const loadSkills = Effect.fnUntraced(function* (state: State, discovered: Discov
     discard: true,
   })
 
-  log.info("init", { count: Object.keys(state.skills).length })
+  yield* Effect.logInfo("init").pipe(
+    Effect.annotateLogs({ service: "skill", ...{ count: Object.keys(state.skills).length } }),
+  )
 })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Skill") {}

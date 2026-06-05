@@ -6,11 +6,7 @@ import { DiffStyle, ScrollAcceleration, ScrollSpeed } from "./tui-schema"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Global } from "@opencode-ai/core/global"
 import { Filesystem } from "@/util/filesystem"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import * as ConfigPaths from "@/config/paths"
-
-const log = EffectLogger.create({ service: "tui.migrate" })
-
 const TUI_SCHEMA_URL = "https://opencode.ai/tui.json"
 
 const decodeTheme = Schema.decodeUnknownOption(Schema.String)
@@ -33,7 +29,6 @@ export async function migrateTuiConfig(input: MigrateInput) {
   const opencode = await opencodeFiles(input)
   for (const file of opencode) {
     const source = await Filesystem.readText(file).catch((error) => {
-      log.warn("failed to read config for tui migration", { path: file, error })
       return undefined
     })
     if (!source) continue
@@ -66,17 +61,14 @@ export async function migrateTuiConfig(input: MigrateInput) {
     const wrote = await Filesystem.write(target, JSON.stringify(payload, null, 2))
       .then(() => true)
       .catch((error) => {
-        log.warn("failed to write tui migration target", { from: file, to: target, error })
         return false
       })
     if (!wrote) continue
 
     const stripped = await backupAndStripLegacy(file, source)
     if (!stripped) {
-      log.warn("tui config migrated but source file was not stripped", { from: file, to: target })
       continue
     }
-    log.info("migrated tui config", { from: file, to: target })
   }
 }
 
@@ -107,7 +99,6 @@ async function backupAndStripLegacy(file: string, source: string) {
     : await Filesystem.write(backup, source)
         .then(() => true)
         .catch((error) => {
-          log.warn("failed to backup source config during tui migration", { path: file, backup, error })
           return false
         })
   if (!backed) return false
@@ -125,11 +116,9 @@ async function backupAndStripLegacy(file: string, source: string) {
 
   return Filesystem.write(file, text)
     .then(() => {
-      log.info("stripped tui keys from server config", { path: file, backup })
       return true
     })
     .catch((error) => {
-      log.warn("failed to strip legacy tui keys from server config", { path: file, backup, error })
       return false
     })
 }

@@ -7,7 +7,6 @@ import type {
 } from "@opencode-ai/plugin"
 import { Config } from "@/config/config"
 import { Bus } from "../bus"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./codex"
@@ -29,9 +28,6 @@ import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } fro
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-
-const log = EffectLogger.create({ service: "plugin" })
-
 type State = {
   hooks: Hooks[]
 }
@@ -152,19 +148,21 @@ export const layer = Layer.effect(
         }
 
         for (const plugin of flags.disableDefaultPlugins ? [] : INTERNAL_PLUGINS) {
-          log.info("loading internal plugin", { name: plugin.name })
+          yield* Effect.logInfo("loading internal plugin").pipe(
+            Effect.annotateLogs({ service: "plugin", ...{ name: plugin.name } }),
+          )
           const init = yield* Effect.tryPromise({
             try: () => plugin(input),
-            catch: (err) => {
-              log.error("failed to load internal plugin", { name: plugin.name, error: err })
-            },
+            catch: (err) => {},
           }).pipe(Effect.option)
           if (init._tag === "Some") hooks.push(init.value)
         }
 
         const plugins = flags.pure ? [] : (cfg.plugin_origins ?? [])
         if (flags.pure && cfg.plugin_origins?.length) {
-          log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
+          yield* Effect.logInfo("skipping external plugins in pure mode").pipe(
+            Effect.annotateLogs({ service: "plugin", ...{ count: cfg.plugin_origins.length } }),
+          )
         }
         if (plugins.length) yield* config.waitForDependencies()
 
@@ -173,12 +171,8 @@ export const layer = Layer.effect(
             items: plugins,
             kind: "server",
             report: {
-              start(candidate) {
-                log.info("loading plugin", { path: candidate.plan.spec })
-              },
-              missing(candidate, _retry, message) {
-                log.warn("plugin has no server entrypoint", { path: candidate.plan.spec, message })
-              },
+              start(candidate) {},
+              missing(candidate, _retry, message) {},
               error(candidate, _retry, stage, error, resolved) {
                 const spec = candidate.plan.spec
                 const cause = error instanceof Error ? (error.cause ?? error) : error
@@ -186,24 +180,19 @@ export const layer = Layer.effect(
 
                 if (stage === "install") {
                   const parsed = parsePluginSpecifier(spec)
-                  log.error("failed to install plugin", { pkg: parsed.pkg, version: parsed.version, error: message })
                   publishPluginError(`Failed to install plugin ${parsed.pkg}@${parsed.version}: ${message}`)
                   return
                 }
 
                 if (stage === "compatibility") {
-                  log.warn("plugin incompatible", { path: spec, error: message })
                   publishPluginError(`Plugin ${spec} skipped: ${message}`)
                   return
                 }
 
                 if (stage === "entry") {
-                  log.error("failed to resolve plugin server entry", { path: spec, error: message })
                   publishPluginError(`Failed to load plugin ${spec}: ${message}`)
                   return
                 }
-
-                log.error("failed to load plugin", { path: spec, target: resolved?.entry, error: message })
                 publishPluginError(`Failed to load plugin ${spec}: ${message}`)
               },
             },
@@ -218,7 +207,6 @@ export const layer = Layer.effect(
             try: () => applyPlugin(load, input, hooks),
             catch: (err) => {
               const message = errorMessage(err)
-              log.error("failed to load plugin", { path: load.spec, error: message })
               return message
             },
           }).pipe(
@@ -238,9 +226,7 @@ export const layer = Layer.effect(
         for (const hook of hooks) {
           yield* Effect.tryPromise({
             try: () => Promise.resolve((hook as any).config?.(cfg)),
-            catch: (err) => {
-              log.error("plugin config hook failed", { error: err })
-            },
+            catch: (err) => {},
           }).pipe(Effect.ignore)
         }
 

@@ -1,11 +1,7 @@
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { InvalidRequestError } from "../errors"
-
-const log = EffectLogger.create({ service: "server" })
-
 // Effect's Issue formatter recursively dumps the rejected `actual` value with
 // no truncation, so a 5KB invalid array produces a ~360KB string. Cap to keep
 // 4xx responses small and avoid mirroring entire request payloads (which may
@@ -27,7 +23,6 @@ export class SchemaErrorMiddleware extends HttpApiMiddleware.Service<SchemaError
 
 export const schemaErrorLayer = HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrorMiddleware, (error, context) => {
   const reason = truncateReason(error.cause.message)
-  log.warn("schema rejection", { kind: error.kind, reason })
   if (context.endpoint.path.startsWith("/api/")) {
     return Effect.fail(
       new InvalidRequestError({

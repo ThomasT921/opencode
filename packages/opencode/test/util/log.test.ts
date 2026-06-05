@@ -36,9 +36,10 @@ it.live("Effect logger writes JSONL to the default state log file", () =>
     restoreEnv("OPENCODE_PRINT_LOGS", undefined)
     process.env.OPENCODE_LOG_LEVEL = "DEBUG"
 
-    yield* EffectLogger.create({ service: "log.test.default" })
-      .info("hello", { answer: 42 })
-      .pipe(Effect.provide(EffectLogger.layer))
+    yield* Effect.logInfo("hello").pipe(
+      Effect.annotateLogs({ service: "log.test.default", answer: 42 }),
+      Effect.provide(EffectLogger.layer),
+    )
 
     const record = JSON.parse(yield* Effect.promise(() => fs.readFile(path.join(dir, "log.jsonl"), "utf8")))
 
@@ -72,10 +73,12 @@ it.live("env can override file path and log level", () =>
     Global.Path.log = dir
     process.env.OPENCODE_LOG_FILE = path.join(dir, "custom.jsonl")
     process.env.OPENCODE_LOG_LEVEL = "WARN"
-
-    const logger = EffectLogger.create({ service: "log.test.env" })
-    yield* logger.info("hidden").pipe(Effect.provide(EffectLogger.layer))
-    yield* logger.warn("visible").pipe(Effect.provide(EffectLogger.layer))
+    yield* Effect.logInfo("hidden")
+      .pipe(Effect.annotateLogs({ service: "log.test.env" }))
+      .pipe(Effect.provide(EffectLogger.layer))
+    yield* Effect.logWarning("visible")
+      .pipe(Effect.annotateLogs({ service: "log.test.env" }))
+      .pipe(Effect.provide(EffectLogger.layer))
 
     const records = (yield* Effect.promise(() => fs.readFile(path.join(dir, "custom.jsonl"), "utf8")))
       .trim()

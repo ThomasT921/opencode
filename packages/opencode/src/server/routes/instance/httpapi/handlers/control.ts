@@ -1,6 +1,5 @@
 import { Auth } from "@/auth"
 import { ProviderID } from "@/provider/schema"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { RootHttpApi } from "../api"
@@ -24,8 +23,13 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
     })
 
     const log = Effect.fn("ControlHttpApi.log")(function* (ctx: { payload: typeof LogInput.Type }) {
-      const logger = EffectLogger.create({ service: ctx.payload.service })
-      logger[ctx.payload.level](ctx.payload.message, ctx.payload.extra)
+      const entry = (() => {
+        if (ctx.payload.level === "debug") return Effect.logDebug(ctx.payload.message)
+        if (ctx.payload.level === "warn") return Effect.logWarning(ctx.payload.message)
+        if (ctx.payload.level === "error") return Effect.logError(ctx.payload.message)
+        return Effect.logInfo(ctx.payload.message)
+      })()
+      yield* entry.pipe(Effect.annotateLogs({ service: ctx.payload.service, ...ctx.payload.extra }))
       return true
     })
 

@@ -8,11 +8,7 @@ import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { WorkspaceTable } from "@/control-plane/workspace.sql"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import nextProjectors from "./projectors-next"
-
-const log = EffectLogger.create({ service: "session.projector" })
-
 function foreign(err: unknown) {
   if (typeof err !== "object" || err === null) return false
   if ("code" in err && err.code === "SQLITE_CONSTRAINT_FOREIGNKEY") return true
@@ -138,7 +134,6 @@ export default [
         .run()
     } catch (err) {
       if (!foreign(err)) throw err
-      log.warn("ignored late message update", { messageID: id, sessionID })
     }
   }),
 
@@ -191,7 +186,6 @@ export default [
       if (next) applyUsage(db, sessionID, next)
     } catch (err) {
       if (!foreign(err)) throw err
-      log.warn("ignored late part update", { partID: id, messageID, sessionID })
     }
   }),
 

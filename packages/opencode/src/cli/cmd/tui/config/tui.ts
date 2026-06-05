@@ -18,15 +18,11 @@ import { TuiKeybind } from "./keybind"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
 import { Filesystem } from "@/util/filesystem"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { ConfigVariable } from "@/config/variable"
 import { Npm } from "@opencode-ai/core/npm"
 import type { DeepMutable } from "@opencode-ai/core/schema"
 import type { TuiAttentionSoundName } from "@opencode-ai/plugin/tui"
 import { FormatError, FormatUnknownError } from "@/cli/error"
-
-const log = EffectLogger.create({ service: "tui.config" })
-
 export const Info = TuiInfo
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -84,12 +80,6 @@ function dropUnknownKeybinds(input: Record<string, unknown>, configFilepath: str
 
   const invalid = TuiKeybind.unknownKeys(input.keybinds)
   if (!invalid.length) return input
-
-  log.warn("ignored unknown tui keybinds", {
-    path: configFilepath,
-    keybinds: invalid,
-    hint: "Remove these entries or rename them to keys from the tui.json schema.",
-  })
   return {
     ...input,
     keybinds: Object.fromEntries(Object.entries(input.keybinds).filter(([key]) => !invalid.includes(key))),
@@ -138,10 +128,6 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
         Effect.sync(() => {
           const error = Cause.squash(cause)
           const reason = FormatError(error) ?? FormatUnknownError(error)
-          log.warn("skipping invalid tui config", {
-            path: configFilepath,
-            reason,
-          })
           return {} as Info
         }),
       ),
@@ -157,16 +143,14 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
           Effect.sync(() => {
             const error = Cause.squash(cause)
             const reason = FormatError(error) ?? FormatUnknownError(error)
-            log.warn("failed to read tui config", {
-              path: filepath,
-              reason,
-            })
             return undefined
           }),
         ),
       )
       if (!text) return {} as Info
-      log.info("loading tui config", { path: filepath })
+      yield* Effect.logInfo("loading tui config").pipe(
+        Effect.annotateLogs({ service: "tui.config", ...{ path: filepath } }),
+      )
       return yield* load(text, filepath)
     })
 
@@ -175,7 +159,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       const data = yield* loadFile(file)
       if (Object.keys(data).length) {
         appliedOrder += 1
-        log.info("applying tui config", { path: file, order: appliedOrder })
+        yield* Effect.logInfo("applying tui config").pipe(
+          Effect.annotateLogs({ service: "tui.config", ...{ path: file, order: appliedOrder } }),
+        )
       }
       acc.result = mergeDeep(acc.result, data)
       if (!data.plugin?.length) return
@@ -210,7 +196,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   if (Flag.OPENCODE_TUI_CONFIG) {
     const configFile = Flag.OPENCODE_TUI_CONFIG
     yield* mergeFile(acc, configFile)
-    log.debug("loaded custom tui config", { path: configFile })
+    yield* Effect.logDebug("loaded custom tui config").pipe(
+      Effect.annotateLogs({ service: "tui.config", ...{ path: configFile } }),
+    )
   }
 
   // 3. Project tui files, applied root-first so the closest file wins.

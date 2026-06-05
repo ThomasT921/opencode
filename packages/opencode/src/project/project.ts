@@ -3,7 +3,6 @@ import { Database } from "@/storage/db"
 import { ProjectTable } from "./project.sql"
 import { PermissionTable, SessionTable } from "../session/session.sql"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { BusEvent } from "@/bus/bus-event"
 import { GlobalBus } from "@/bus/global"
@@ -21,9 +20,6 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AbsolutePath, NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-
-const log = EffectLogger.create({ service: "project" })
-
 const ProjectVcs = Schema.Literal("git")
 
 const ProjectIcon = Schema.Struct({
@@ -233,7 +229,7 @@ export const layer = Layer.effect(
     })
 
     const fromDirectory = Effect.fn("Project.fromDirectory")(function* (directory: string) {
-      log.info("fromDirectory", { directory })
+      yield* Effect.logInfo("fromDirectory").pipe(Effect.annotateLogs({ service: "project", ...{ directory } }))
 
       const data = yield* projectV2.resolve(AbsolutePath.make(directory))
       const worktree = data.id === ProjectV2.ID.make("global") && !data.vcs ? "/" : data.directory

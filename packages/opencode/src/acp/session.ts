@@ -1,10 +1,6 @@
 import { RequestError, type McpServer } from "@agentclientprotocol/sdk"
 import type { ACPSessionState } from "./types"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-
-const log = EffectLogger.create({ service: "acp-session-manager" })
-
 export class ACPSessionManager {
   private sessions = new Map<string, ACPSessionState>()
   private sdk: OpencodeClient
@@ -37,8 +33,6 @@ export class ACPSessionManager {
       createdAt: new Date(),
       model: resolvedModel,
     }
-    log.info("creating_session", { state })
-
     this.sessions.set(sessionId, state)
     return state
   }
@@ -68,8 +62,6 @@ export class ACPSessionManager {
       createdAt: new Date(session.time.created),
       model: resolvedModel,
     }
-    log.info("loading_session", { state })
-
     this.sessions.set(sessionId, state)
     return state
   }
@@ -77,7 +69,6 @@ export class ACPSessionManager {
   get(sessionId: string): ACPSessionState {
     const session = this.sessions.get(sessionId)
     if (!session) {
-      log.error("session not found", { sessionId })
       throw RequestError.invalidParams(JSON.stringify({ error: `Session not found: ${sessionId}` }))
     }
     return session

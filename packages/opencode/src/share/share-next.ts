@@ -13,10 +13,7 @@ import type { SessionID } from "@/session/schema"
 import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
 import { Config } from "@/config/config"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { SessionShareTable } from "./share.sql"
-
-const log = EffectLogger.create({ service: "share-next" })
 const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
 
 export type Api = {
@@ -139,11 +136,7 @@ export const layer = Layer.effect(
         s.queue.set(sessionID, next)
         yield* flush(sessionID).pipe(
           Effect.delay(1000),
-          Effect.catchCause((cause) =>
-            Effect.sync(() => {
-              log.error("share flush failed", { sessionID, cause })
-            }),
-          ),
+          Effect.catchCause((cause) => Effect.sync(() => {})),
           Effect.forkIn(s.scope),
         )
       })
@@ -173,15 +166,7 @@ export const layer = Layer.effect(
           bus.subscribe(def as never).pipe(
             Effect.flatMap((stream) =>
               stream.pipe(
-                Stream.runForEach((evt) =>
-                  fn(evt).pipe(
-                    Effect.catchCause((cause) =>
-                      Effect.sync(() => {
-                        log.error("share subscriber failed", { type: def.type, cause })
-                      }),
-                    ),
-                  ),
-                ),
+                Stream.runForEach((evt) => fn(evt).pipe(Effect.catchCause((cause) => Effect.sync(() => {})))),
                 Effect.forkScoped,
               ),
             ),
@@ -271,12 +256,14 @@ export const layer = Layer.effect(
       )
 
       if (res.status >= 400) {
-        log.warn("failed to sync share", { sessionID, shareID: share.id, status: res.status })
+        yield* Effect.logWarning("failed to sync share").pipe(
+          Effect.annotateLogs({ service: "share-next", ...{ sessionID, shareID: share.id, status: res.status } }),
+        )
       }
     })
 
     const full = Effect.fn("ShareNext.full")(function* (sessionID: SessionID) {
-      log.info("full sync", { sessionID })
+      yield* Effect.logInfo("full sync").pipe(Effect.annotateLogs({ service: "share-next", ...{ sessionID } }))
       const info = yield* session.get(sessionID)
       const diffs = yield* session.diff(sessionID)
       const messages = yield* session.messages({ sessionID })
@@ -313,7 +300,7 @@ export const layer = Layer.effect(
 
     const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID) {
       if (disabled) return { id: "", url: "", secret: "" }
-      log.info("creating share", { sessionID })
+      yield* Effect.logInfo("creating share").pipe(Effect.annotateLogs({ service: "share-next", ...{ sessionID } }))
       const req = yield* request()
       const result = yield* HttpClientRequest.post(`${req.baseUrl}${req.api.create}`).pipe(
         HttpClientRequest.setHeaders(req.headers),
@@ -334,11 +321,7 @@ export const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       s.shared.set(sessionID, result)
       yield* full(sessionID).pipe(
-        Effect.catchCause((cause) =>
-          Effect.sync(() => {
-            log.error("share full sync failed", { sessionID, cause })
-          }),
-        ),
+        Effect.catchCause((cause) => Effect.sync(() => {})),
         Effect.forkIn(s.scope),
       )
       return result
@@ -346,7 +329,7 @@ export const layer = Layer.effect(
 
     const remove = Effect.fn("ShareNext.remove")(function* (sessionID: SessionID) {
       if (disabled) return
-      log.info("removing share", { sessionID })
+      yield* Effect.logInfo("removing share").pipe(Effect.annotateLogs({ service: "share-next", ...{ sessionID } }))
       const s = yield* InstanceState.get(state)
       const share = yield* getCached(sessionID)
       if (!share) {

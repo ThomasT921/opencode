@@ -1,6 +1,5 @@
 import { Effect, Exit, Layer, PubSub, Scope, Context, Stream, Schema } from "effect"
 import { EffectBridge } from "@/effect/bridge"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { BusEvent } from "./bus-event"
 import { GlobalBus } from "./global"
 import { InstanceState } from "@/effect/instance-state"
@@ -9,9 +8,6 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Identifier } from "@/id/id"
 import type { InstanceContext } from "@/project/instance-context"
 import { InstanceRef } from "@/effect/instance-ref"
-
-const log = EffectLogger.create({ service: "bus" })
-
 type BusProperties<D extends BusEvent.Definition<string, Schema.Top>> = Schema.Schema.Type<D["properties"]>
 
 export const InstanceDisposed = BusEvent.define(
@@ -101,7 +97,7 @@ export const layer = Layer.effect(
       return Effect.gen(function* () {
         const s = yield* InstanceState.get(state)
         const payload: Payload = { id: options?.id ?? createID(), type: def.type, properties }
-        log.info("publishing", { type: def.type })
+        yield* Effect.logInfo("publishing").pipe(Effect.annotateLogs({ service: "bus", ...{ type: def.type } }))
 
         const ps = s.typed.get(def.type)
         if (ps) yield* PubSub.publish(ps, payload)
@@ -124,26 +120,34 @@ export const layer = Layer.effect(
       def: D,
     ): Effect.Effect<Stream.Stream<Payload<D>>, never, Scope.Scope> =>
       Effect.gen(function* () {
-        log.info("subscribing", { type: def.type })
+        yield* Effect.logInfo("subscribing").pipe(Effect.annotateLogs({ service: "bus", ...{ type: def.type } }))
         const s = yield* InstanceState.get(state)
         const ps = yield* getOrCreate(s, def)
         const subscription = yield* PubSub.subscribe(ps)
-        yield* Effect.addFinalizer(() => Effect.sync(() => log.info("unsubscribing", { type: def.type })))
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() =>
+            Effect.logInfo("unsubscribing").pipe(Effect.annotateLogs({ service: "bus", ...{ type: def.type } })),
+          ),
+        )
         return Stream.fromSubscription(subscription)
       })
 
     const subscribeAll = (): Effect.Effect<Stream.Stream<Payload>, never, Scope.Scope> =>
       Effect.gen(function* () {
-        log.info("subscribing", { type: "*" })
+        yield* Effect.logInfo("subscribing").pipe(Effect.annotateLogs({ service: "bus", ...{ type: "*" } }))
         const s = yield* InstanceState.get(state)
         const subscription = yield* PubSub.subscribe(s.wildcard)
-        yield* Effect.addFinalizer(() => Effect.sync(() => log.info("unsubscribing", { type: "*" })))
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() =>
+            Effect.logInfo("unsubscribing").pipe(Effect.annotateLogs({ service: "bus", ...{ type: "*" } })),
+          ),
+        )
         return Stream.fromSubscription(subscription)
       })
 
     function on<T>(pubsub: PubSub.PubSub<T>, type: string, callback: (event: T) => unknown) {
       return Effect.gen(function* () {
-        log.info("subscribing", { type })
+        yield* Effect.logInfo("subscribing").pipe(Effect.annotateLogs({ service: "bus", ...{ type } }))
         const bridge = yield* EffectBridge.make()
         const scope = yield* Scope.make()
         const subscription = yield* Scope.provide(scope)(PubSub.subscribe(pubsub))
@@ -153,9 +157,7 @@ export const layer = Layer.effect(
             Stream.runForEach((msg) =>
               Effect.tryPromise({
                 try: () => Promise.resolve().then(() => callback(msg)),
-                catch: (cause) => {
-                  log.error("subscriber failed", { type, cause })
-                },
+                catch: (cause) => {},
               }).pipe(Effect.ignore),
             ),
             Effect.forkScoped,
@@ -163,7 +165,6 @@ export const layer = Layer.effect(
         )
 
         return () => {
-          log.info("unsubscribing", { type })
           bridge.fork(Scope.close(scope, Exit.void))
         }
       })

@@ -1,11 +1,8 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { OAUTH_DUMMY_KEY } from "../auth"
 import { createServer } from "http"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-
-const log = EffectLogger.create({ service: "plugin.xai" })
-
+import { Effect } from "effect"
 // Public Grok-CLI OAuth client. xAI's auth server rejects loopback OAuth from
 // non-allowlisted clients, so we reuse the Grok-CLI client_id that xAI ships
 // for desktop OAuth flows. Source of truth: hermes-agent PR #26534.
@@ -510,8 +507,7 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
       // behavior and crash the entire opencode process. Matches the silent-
       // swallow behavior the Codex plugin gets from its permanent
       // `oauthServer!.on("error", reject)`.
-      server.on("error", (err) => log.warn("xai oauth server error", { error: err }))
-      log.info("xai oauth server started", { host: OAUTH_HOST, port: OAUTH_PORT })
+      server.on("error", () => {})
       resolve()
     })
     oauthServer = server
@@ -522,7 +518,9 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
 
 function stopOAuthServer() {
   if (oauthServer) {
-    oauthServer.close(() => log.info("xai oauth server stopped"))
+    oauthServer.close(() =>
+      Effect.logInfo("xai oauth server stopped").pipe(Effect.annotateLogs({ service: "plugin.xai" })),
+    )
     oauthServer = undefined
   }
 }
@@ -607,7 +605,6 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
             if (expiresSoon) {
               if (!refreshPromise) {
                 const refreshToken = currentAuth.refresh
-                log.info("refreshing xai access token")
                 refreshPromise = refreshAccessToken(refreshToken, options)
                   .then(async (tokens) => {
                     const refreshedExpires = Date.now() + (tokens.expires_in ?? 3600) * 1000
@@ -627,7 +624,11 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
                           expires: refreshedExpires,
                         },
                       })
-                      .catch((err) => log.warn("failed to persist refreshed xai tokens", { error: err }))
+                      .catch((err) =>
+                        Effect.logWarning("failed to persist refreshed xai tokens").pipe(
+                          Effect.annotateLogs({ service: "plugin.xai", ...{ error: err } }),
+                        ),
+                      )
                     return { access: tokens.access_token, refresh: refreshedRefresh, expires: refreshedExpires }
                   })
                   .finally(() => {
@@ -688,7 +689,6 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
                     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   }
                 } catch (err) {
-                  log.error("xai oauth callback failed", { error: err })
                   return { type: "failed" as const }
                 } finally {
                   stopOAuthServer()
@@ -725,7 +725,6 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
                     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   }
                 } catch (err) {
-                  log.error("xai device code callback failed", { error: err })
                   return { type: "failed" as const }
                 }
               },

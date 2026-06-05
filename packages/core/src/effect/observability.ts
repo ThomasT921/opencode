@@ -1,4 +1,4 @@
-import { Effect, Layer, Logger } from "effect"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization } from "effect/unstable/observability"
 import * as EffectLogger from "./logger"
@@ -54,17 +54,13 @@ export function resource(): { serviceName: string; serviceVersion: string; attri
 }
 
 function logs() {
-  return Logger.layer(
-    [
-      EffectLogger.logger,
-      OtlpLogger.make({
-        url: `${base}/v1/logs`,
-        resource: resource(),
-        headers,
-      }),
-    ],
-    { mergeWithExisting: false },
-  ).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer))
+  return EffectLogger.layerWith([
+    OtlpLogger.make({
+      url: `${base}/v1/logs`,
+      resource: resource(),
+      headers,
+    }),
+  ]).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer))
 }
 
 const traces = async () => {

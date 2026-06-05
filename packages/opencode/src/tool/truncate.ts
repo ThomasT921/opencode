@@ -6,11 +6,8 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { evaluate } from "@/permission/evaluate"
 import { Config } from "@/config/config"
 import { Identifier } from "../id/id"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
-
-const log = EffectLogger.create({ service: "truncation" })
 const RETENTION = Duration.days(7)
 
 export const MAX_LINES = 2000
@@ -143,7 +140,6 @@ export const layer = Layer.effect(
 
     yield* cleanup().pipe(
       Effect.catchCause((cause) => {
-        log.error("truncation cleanup failed", { cause: Cause.pretty(cause) })
         return Effect.void
       }),
       Effect.repeat(Schedule.spaced(Duration.hours(1))),

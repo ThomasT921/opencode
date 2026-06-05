@@ -19,7 +19,6 @@ import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionEvent } from "@opencode-ai/core/session-event"
@@ -30,8 +29,6 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
 
 const DOOM_LOOP_THRESHOLD = 3
-const log = EffectLogger.create({ service: "session.processor" })
-
 export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
@@ -120,7 +117,11 @@ export const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
-      const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
+      const logAnnotations = {
+        service: "session.processor",
+        "session.id": input.sessionID,
+        messageID: input.assistantMessage.id,
+      }
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -749,7 +750,13 @@ export const layer = Layer.effect(
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
-        slog.error("process", { error: errorMessage(e), stack: e instanceof Error ? e.stack : undefined })
+        yield* Effect.logError("process").pipe(
+          Effect.annotateLogs({
+            ...logAnnotations,
+            error: errorMessage(e),
+            stack: e instanceof Error ? e.stack : undefined,
+          }),
+        )
         const error = parse(e)
         if (MessageV2.ContextOverflowError.isInstance(error)) {
           ctx.needsCompaction = true
@@ -778,7 +785,7 @@ export const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
-        slog.info("process")
+        yield* Effect.logInfo("process").pipe(Effect.annotateLogs(logAnnotations))
         ctx.needsCompaction = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 

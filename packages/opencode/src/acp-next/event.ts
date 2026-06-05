@@ -1,5 +1,4 @@
 import type { AgentSideConnection } from "@agentclientprotocol/sdk"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import type {
   Event,
   EventMessagePartDelta,
@@ -19,9 +18,6 @@ import {
   shellOutputSnapshot,
   completedToolUpdate,
 } from "./tool"
-
-const log = EffectLogger.create({ service: "acp-next-event" })
-
 type Connection = Pick<AgentSideConnection, "sessionUpdate">
 type GlobalEventEnvelope = {
   payload?: Event
@@ -55,7 +51,6 @@ export class Subscription {
     this.started = true
     this.run().catch((error: unknown) => {
       if (this.abort.signal.aborted) return
-      log.error("event subscription failed", { error })
     })
   }
 
@@ -92,9 +87,7 @@ export class Subscription {
       for await (const event of events.stream) {
         if (this.abort.signal.aborted) return
         if (!event.payload) continue
-        await this.handle(event.payload).catch((error: unknown) => {
-          log.error("failed to handle event", { error, type: event.payload?.type })
-        })
+        await this.handle(event.payload).catch((error: unknown) => {})
       }
       if (!this.abort.signal.aborted) await new Promise((resolve) => setTimeout(resolve, 1000))
     }
@@ -182,7 +175,6 @@ export class Subscription {
       )
       .then((response) => response.data)
       .catch((error: unknown) => {
-        log.error("unexpected error when fetching message for delta metadata", { error, messageId, partId })
         return undefined
       })
     if (!message) return

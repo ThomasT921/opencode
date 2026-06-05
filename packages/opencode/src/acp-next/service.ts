@@ -30,7 +30,6 @@ import {
   type SetSessionModeResponse,
 } from "@agentclientprotocol/sdk"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import type { Message, OpencodeClient, SessionMessageResponse } from "@opencode-ai/sdk/v2"
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
 import * as ACPNextError from "./error"
@@ -43,8 +42,6 @@ import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
 
 export const AuthMethodID = "opencode-login"
-const log = EffectLogger.create({ service: "acp-next-service" })
-
 export type Error = ACPNextError.Error
 
 export type Interface = {
@@ -296,13 +293,7 @@ export function make(input: {
     yield* request(
       () => input.sdk.session.abort({ directory: removed.cwd, sessionID: params.sessionId }, { throwOnError: true }),
       "session",
-    ).pipe(
-      Effect.catch((error) =>
-        Effect.sync(() => {
-          log.error("failed to abort session while closing ACP session", { error, sessionID: params.sessionId })
-        }),
-      ),
-    )
+    ).pipe(Effect.catch((error) => Effect.sync(() => {})))
     return {}
   })
 
@@ -477,9 +468,7 @@ function replayMessages(subscription: ACPNextEvent.Subscription | undefined, mes
   if (!subscription) return Effect.void
   return Effect.promise(async () => {
     for (const message of messages) {
-      await subscription.replayMessage(message).catch((error: unknown) => {
-        log.error("failed to replay ACP message", { error, messageID: message.info.id })
-      })
+      await subscription.replayMessage(message).catch((error: unknown) => {})
     }
   })
 }

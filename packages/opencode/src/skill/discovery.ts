@@ -4,7 +4,6 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } fr
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Global } from "@opencode-ai/core/global"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 
 const skillConcurrency = 4
 const fileConcurrency = 8
@@ -28,7 +27,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
   Layer.effect(
     Service,
     Effect.gen(function* () {
-      const log = EffectLogger.create({ service: "skill-discovery" })
       const fs = yield* AppFileSystem.Service
       const path = yield* Path.Path
       const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
@@ -44,7 +42,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
           Effect.as(true),
           Effect.catch((err) =>
             Effect.sync(() => {
-              log.error("failed to download", { url, err })
               return false
             }),
           ),
@@ -56,7 +53,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
         const index = new URL("index.json", base).href
         const host = base.slice(0, -1)
 
-        log.info("fetching index", { url: index })
+        yield* Effect.logInfo("fetching index").pipe(
+          Effect.annotateLogs({ service: "skill-discovery", ...{ url: index } }),
+        )
 
         const data = yield* HttpClientRequest.get(index).pipe(
           HttpClientRequest.acceptJson,
@@ -64,7 +63,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
           Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
           Effect.catch((err) =>
             Effect.sync(() => {
-              log.error("failed to fetch index", { url: index, err })
               return null
             }),
           ),
@@ -74,7 +72,6 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Path.Pat
 
         const list = data.skills.filter((skill) => {
           if (!skill.files.includes("SKILL.md")) {
-            log.warn("skill entry missing SKILL.md", { url: index, skill: skill.name })
             return false
           }
           return true

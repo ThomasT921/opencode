@@ -4,7 +4,6 @@ import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node"
 import type { Diagnostic as VSCodeDiagnostic } from "vscode-languageserver-types"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Process } from "@/util/process"
 import { LANGUAGE_EXTENSIONS } from "./language"
 import { Effect, Schema } from "effect"
@@ -26,8 +25,6 @@ const INITIALIZE_TIMEOUT_MS = 45_000
 const FILE_CHANGE_CREATED = 1
 const FILE_CHANGE_CHANGED = 2
 const TEXT_DOCUMENT_SYNC_INCREMENTAL = 2
-
-const log = EffectLogger.create({ service: "lsp.client" })
 const busRuntime = makeRuntime(Bus.Service, Bus.layer)
 
 export type Info = NonNullable<Awaited<ReturnType<typeof create>>>
@@ -145,23 +142,13 @@ export async function create(input: {
   directory: string
   instance: InstanceContext
 }) {
-  const logger = log.clone().tag("serverID", input.serverID)
-  logger.info("starting client")
+  const logAnnotations = { service: "lsp.client", serverID: input.serverID }
   const instance = input.instance
 
   const connection = createMessageConnection(
     new StreamMessageReader(input.server.process.stdout as any),
     new StreamMessageWriter(input.server.process.stdin as any),
   )
-  // Server stderr can contain both real errors and routine informational logs,
-  // which is normal stderr practice for some tools. Keep the raw stream at
-  // debug so users can opt in with --print-logs --log-level DEBUG without
-  // polluting normal logs.
-  input.server.process.stderr?.on("data", (data: Buffer) => {
-    const text = data.toString().trim()
-    if (text) logger.debug("server stderr", { text: text.slice(0, 1000) })
-  })
-
   // --- Connection state ---
 
   const pushDiagnostics = new Map<string, Diagnostic[]>()
@@ -191,11 +178,6 @@ export async function create(input: {
   connection.onNotification("textDocument/publishDiagnostics", (params) => {
     const filePath = getFilePath(params.uri)
     if (!filePath) return
-    logger.info("textDocument/publishDiagnostics", {
-      path: filePath,
-      count: params.diagnostics.length,
-      version: params.version,
-    })
     published.set(filePath, {
       at: Date.now(),
       version: typeof params.version === "number" ? params.version : undefined,
@@ -207,7 +189,6 @@ export async function create(input: {
     updatePushDiagnostics(filePath, params.diagnostics)
   })
   connection.onRequest("window/workDoneProgress/create", (params) => {
-    logger.info("window/workDoneProgress/create", params)
     return null
   })
   connection.onRequest("workspace/configuration", async (params) => {
@@ -242,10 +223,6 @@ export async function create(input: {
   ])
   connection.onRequest("workspace/diagnostic/refresh", async () => null)
   connection.listen()
-
-  // --- Initialize handshake ---
-
-  logger.info("sending initialize")
   const initialized = await withTimeout(
     connection.sendRequest<{ capabilities?: ServerCapabilities }>("initialize", {
       rootUri: pathToFileURL(input.root).href,
@@ -289,7 +266,6 @@ export async function create(input: {
     }),
     INITIALIZE_TIMEOUT_MS,
   ).catch((err) => {
-    logger.error("initialize error", { error: err })
     throw new InitializeError({ serverID: input.serverID, cause: err })
   })
 
@@ -602,11 +578,6 @@ export async function create(input: {
 
         const document = files[request.path]
         if (document !== undefined) {
-          // Do not wipe diagnostics on didChange. Some servers (e.g. clangd) only
-          // re-emit diagnostics when the content actually changes, so clearing
-          // here would lose errors for no-op touchFile calls. Let the server's
-          // next push/pull overwrite naturally.
-          logger.info("workspace/didChangeWatchedFiles", request)
           await connection.sendNotification("workspace/didChangeWatchedFiles", {
             changes: [
               {
@@ -618,10 +589,6 @@ export async function create(input: {
 
           const next = document.version + 1
           files[request.path] = { version: next, text }
-          logger.info("textDocument/didChange", {
-            path: request.path,
-            version: next,
-          })
           await connection.sendNotification("textDocument/didChange", {
             textDocument: {
               uri: pathToFileURL(request.path).href,
@@ -642,8 +609,6 @@ export async function create(input: {
           })
           return next
         }
-
-        logger.info("workspace/didChangeWatchedFiles", request)
         await connection.sendNotification("workspace/didChangeWatchedFiles", {
           changes: [
             {
@@ -652,8 +617,6 @@ export async function create(input: {
             },
           ],
         })
-
-        logger.info("textDocument/didOpen", request)
         pushDiagnostics.delete(request.path)
         pullDiagnostics.delete(request.path)
         await connection.sendNotification("textDocument/didOpen", {
@@ -679,11 +642,6 @@ export async function create(input: {
       const normalizedPath = Filesystem.normalizePath(
         path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path),
       )
-      logger.info("waiting for diagnostics", {
-        path: normalizedPath,
-        mode: request.mode ?? "full",
-        version: request.version,
-      })
       if (request.mode === "document") {
         await waitForDocumentDiagnostics({ path: normalizedPath, version: request.version, after: request.after })
         return
@@ -691,16 +649,11 @@ export async function create(input: {
       await waitForFullDiagnostics({ path: normalizedPath, version: request.version, after: request.after })
     },
     async shutdown() {
-      logger.info("shutting down")
       connection.end()
       connection.dispose()
       await Process.stop(input.server.process)
-      logger.info("shutdown")
     },
   }
-
-  logger.info("initialized")
-
   return result
 }
 

@@ -3,7 +3,6 @@ import fuzzysort from "fuzzysort"
 import { Config } from "@/config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Npm } from "@opencode-ai/core/npm"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Plugin } from "../plugin"
@@ -28,9 +27,6 @@ import * as ProviderTransform from "./transform"
 import { ModelID, ProviderID } from "./schema"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-
-const log = EffectLogger.create({ service: "provider" })
-
 function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
   if (!match) return false
@@ -625,7 +621,6 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
         async discoverModels(): Promise<Record<string, Model>> {
           if (!apiKey) {
-            log.info("gitlab model discovery skipped: no apiKey")
             return {}
           }
 
@@ -633,19 +628,9 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
             const token = apiKey
             const getHeaders = (): Record<string, string> =>
               auth?.type === "api" ? { "PRIVATE-TOKEN": token } : { Authorization: `Bearer ${token}` }
-
-            log.info("gitlab model discovery starting", { instanceUrl })
             const result = await discoverWorkflowModels({ instanceUrl, getHeaders }, { workingDirectory: directory })
 
             if (!result.models.length) {
-              log.info("gitlab model discovery skipped: no models found", {
-                project: result.project
-                  ? {
-                      id: result.project.id,
-                      path: result.project.pathWithNamespace,
-                    }
-                  : null,
-              })
               return {}
             }
 
@@ -693,14 +678,8 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
                 }
               }
             }
-
-            log.info("gitlab model discovery complete", {
-              count: Object.keys(models).length,
-              models: Object.keys(models),
-            })
             return models
           } catch (e) {
-            log.warn("gitlab model discovery failed", { error: e })
             return {}
           }
         },
@@ -1200,7 +1179,6 @@ export const layer = Layer.effect(
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
-        using _ = log.time("state")
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
         const modelsDev = yield* modelsDevSvc.get()
@@ -1226,7 +1204,7 @@ export const layer = Layer.effect(
           get: (key: string) => env.get(key),
         }
 
-        log.info("init")
+        yield* Effect.logInfo("init").pipe(Effect.annotateLogs({ service: "provider" }))
 
         function mergeProvider(providerID: ProviderID, provider: Partial<Info>) {
           const existing = providers[providerID]
@@ -1428,7 +1406,9 @@ export const layer = Layer.effect(
           if (disabled.has(providerID)) continue
           const data = database[providerID]
           if (!data) {
-            log.error("Provider does not exist in model list " + providerID)
+            yield* Effect.logError("Provider does not exist in model list " + providerID).pipe(
+              Effect.annotateLogs({ service: "provider" }),
+            )
             continue
           }
           const result = yield* fn(data)
@@ -1462,9 +1442,7 @@ export const layer = Layer.effect(
                   providers[gitlab].models[modelID] = model
                 }
               }
-            } catch (e) {
-              log.warn("state discovery error", { id: "gitlab", error: e })
-            }
+            } catch (e) {}
           })
         }
 
@@ -1516,7 +1494,7 @@ export const layer = Layer.effect(
             continue
           }
 
-          log.info("found", { providerID })
+          yield* Effect.logInfo("found").pipe(Effect.annotateLogs({ service: "provider", ...{ providerID } }))
         }
 
         return {
@@ -1534,9 +1512,6 @@ export const layer = Layer.effect(
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
-        using _ = log.time("getSDK", {
-          providerID: model.providerID,
-        })
         const provider = s.providers[model.providerID]
         const options = { ...provider.options }
 
@@ -1647,10 +1622,6 @@ export const layer = Layer.effect(
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
         if (bundledLoader) {
-          log.info("using bundled provider", {
-            providerID: model.providerID,
-            pkg: model.api.npm,
-          })
           const factory = await bundledLoader()
           const loaded = factory({
             name: model.providerID,
@@ -1666,7 +1637,6 @@ export const layer = Layer.effect(
           if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
           installedPath = item.entrypoint
         } else {
-          log.info("loading local provider", { pkg: model.api.npm })
           installedPath = model.api.npm
         }
 

@@ -1,13 +1,9 @@
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Effect, Exit, Layer, Option, RcMap, Schema, Context, TxReentrantLock } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Git } from "@/git"
-
-const log = EffectLogger.create({ service: "storage" })
-
 type Migration = (
   dir: string,
   fs: AppFileSystem.Interface,
@@ -95,7 +91,7 @@ const MIGRATIONS: Migration[] = [
     for (const projectDir of projectDirs) {
       const full = path.join(project, projectDir)
       if (!(yield* fs.isDir(full))) continue
-      log.info(`migrating project ${projectDir}`)
+      yield* Effect.logInfo(`migrating project ${projectDir}`).pipe(Effect.annotateLogs({ service: "storage" }))
       let projectID = projectDir
       let worktree = "/"
 
@@ -141,43 +137,59 @@ const MIGRATIONS: Migration[] = [
           ),
         )
 
-        log.info(`migrating sessions for project ${projectID}`)
+        yield* Effect.logInfo(`migrating sessions for project ${projectID}`).pipe(
+          Effect.annotateLogs({ service: "storage" }),
+        )
         for (const sessionFile of yield* fs.glob("storage/session/info/*.json", {
           cwd: full,
           absolute: true,
         })) {
           const dest = path.join(dir, "session", projectID, path.basename(sessionFile))
-          log.info("copying", { sessionFile, dest })
+          yield* Effect.logInfo("copying").pipe(Effect.annotateLogs({ service: "storage", ...{ sessionFile, dest } }))
           const session = yield* fs.readJson(sessionFile)
           const info = decodeSession(session, { onExcessProperty: "preserve" })
           yield* fs.writeWithDirs(dest, JSON.stringify(session, null, 2))
           if (Option.isNone(info)) continue
-          log.info(`migrating messages for session ${info.value.id}`)
+          yield* Effect.logInfo(`migrating messages for session ${info.value.id}`).pipe(
+            Effect.annotateLogs({ service: "storage" }),
+          )
           for (const msgFile of yield* fs.glob(`storage/session/message/${info.value.id}/*.json`, {
             cwd: full,
             absolute: true,
           })) {
             const next = path.join(dir, "message", info.value.id, path.basename(msgFile))
-            log.info("copying", {
-              msgFile,
-              dest: next,
-            })
+            yield* Effect.logInfo("copying").pipe(
+              Effect.annotateLogs({
+                service: "storage",
+                ...{
+                  msgFile,
+                  dest: next,
+                },
+              }),
+            )
             const message = yield* fs.readJson(msgFile)
             const item = decodeMessage(message, { onExcessProperty: "preserve" })
             yield* fs.writeWithDirs(next, JSON.stringify(message, null, 2))
             if (Option.isNone(item)) continue
 
-            log.info(`migrating parts for message ${item.value.id}`)
+            yield* Effect.logInfo(`migrating parts for message ${item.value.id}`).pipe(
+              Effect.annotateLogs({ service: "storage" }),
+            )
             for (const partFile of yield* fs.glob(`storage/session/part/${info.value.id}/${item.value.id}/*.json`, {
               cwd: full,
               absolute: true,
             })) {
               const out = path.join(dir, "part", item.value.id, path.basename(partFile))
               const part = yield* fs.readJson(partFile)
-              log.info("copying", {
-                partFile,
-                dest: out,
-              })
+              yield* Effect.logInfo("copying").pipe(
+                Effect.annotateLogs({
+                  service: "storage",
+                  ...{
+                    partFile,
+                    dest: out,
+                  },
+                }),
+              )
               yield* fs.writeWithDirs(out, JSON.stringify(part, null, 2))
             }
           }
@@ -235,11 +247,13 @@ export const layer = Layer.effect(
           Effect.orElseSucceed(() => 0),
         )
         for (let i = migration; i < MIGRATIONS.length; i++) {
-          log.info("running migration", { index: i })
+          yield* Effect.logInfo("running migration").pipe(Effect.annotateLogs({ service: "storage", ...{ index: i } }))
           const step = MIGRATIONS[i]!
           const exit = yield* Effect.exit(step(dir, fs, git))
           if (Exit.isFailure(exit)) {
-            log.error("failed to run migration", { index: i, cause: exit.cause })
+            yield* Effect.logError("failed to run migration").pipe(
+              Effect.annotateLogs({ service: "storage", ...{ index: i, cause: exit.cause } }),
+            )
             break
           }
           yield* fs.writeWithDirs(marker, String(i + 1))

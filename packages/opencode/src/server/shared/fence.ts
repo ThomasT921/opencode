@@ -3,13 +3,10 @@ import { inArray } from "drizzle-orm"
 import { EventSequenceTable } from "@/sync/event.sql"
 import { Workspace } from "@/control-plane/workspace"
 import type { WorkspaceID } from "@/control-plane/schema"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Effect } from "effect"
 
 export const HEADER = "x-opencode-sync"
 export type State = Record<string, number>
-const log = EffectLogger.create({ service: "fence" })
-
 export function load(ids?: string[]) {
   const rows = Database.use((db) => {
     if (!ids?.length) {
@@ -55,14 +52,24 @@ export function parse(headers: Headers): State | undefined {
 
 export function wait(workspaceID: WorkspaceID, state: State, signal?: AbortSignal) {
   return Effect.gen(function* () {
-    log.info("waiting for state", {
-      workspaceID,
-      state,
-    })
+    yield* Effect.logInfo("waiting for state").pipe(
+      Effect.annotateLogs({
+        service: "fence",
+        ...{
+          workspaceID,
+          state,
+        },
+      }),
+    )
     yield* Workspace.Service.use((workspace) => workspace.waitForSync(workspaceID, state, signal))
-    log.info("state fully synced", {
-      workspaceID,
-      state,
-    })
+    yield* Effect.logInfo("state fully synced").pipe(
+      Effect.annotateLogs({
+        service: "fence",
+        ...{
+          workspaceID,
+          state,
+        },
+      }),
+    )
   })
 }

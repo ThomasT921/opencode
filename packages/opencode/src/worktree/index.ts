@@ -6,7 +6,6 @@ import { Database } from "@/storage/db"
 import { eq } from "drizzle-orm"
 import { ProjectTable } from "../project/project.sql"
 import type { ProjectID } from "../project/schema"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { Slug } from "@opencode-ai/core/util/slug"
 import { errorMessage } from "../util/error"
 import { BusEvent } from "@/bus/bus-event"
@@ -18,9 +17,6 @@ import { NodePath } from "@effect/platform-node"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { AppProcess } from "@opencode-ai/core/process"
 import { InstanceState } from "@/effect/instance-state"
-
-const log = EffectLogger.create({ service: "worktree" })
-
 export const Event = {
   Ready: BusEvent.define(
     "worktree.ready",
@@ -247,7 +243,9 @@ export const layer: Layer.Layer<
       const populated = yield* git(["reset", "--hard"], { cwd: info.directory })
       if (populated.code !== 0) {
         const message = populated.stderr || populated.text || "Failed to populate worktree"
-        log.error("worktree checkout failed", { directory: info.directory, message })
+        yield* Effect.logError("worktree checkout failed").pipe(
+          Effect.annotateLogs({ service: "worktree", ...{ directory: info.directory, message } }),
+        )
         GlobalBus.emit("event", {
           directory: info.directory,
           project: ctx.project.id,
@@ -262,7 +260,6 @@ export const layer: Layer.Layer<
         Effect.catch((error) =>
           Effect.sync(() => {
             const message = errorMessage(error)
-            log.error("worktree bootstrap failed", { directory: info.directory, message })
             GlobalBus.emit("event", {
               directory: info.directory,
               project: ctx.project.id,
@@ -291,7 +288,13 @@ export const layer: Layer.Layer<
     const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
       yield* setup(info)
       yield* boot(info, startCommand).pipe(
-        Effect.catchCause((cause) => Effect.sync(() => log.error("worktree bootstrap failed", { cause }))),
+        Effect.catchCause((cause) =>
+          Effect.sync(() =>
+            Effect.logError("worktree bootstrap failed").pipe(
+              Effect.annotateLogs({ service: "worktree", ...{ cause } }),
+            ),
+          ),
+        ),
         Effect.forkIn(scope),
       )
     })
@@ -470,7 +473,9 @@ export const layer: Layer.Layer<
       if (!text) return true
       const result = yield* runStartCommand(directory, text)
       if (result.code === 0) return true
-      log.error("worktree start command failed", { kind, directory, message: result.stderr })
+      yield* Effect.logError("worktree start command failed").pipe(
+        Effect.annotateLogs({ service: "worktree", ...{ kind, directory, message: result.stderr } }),
+      )
       return false
     })
 
@@ -596,7 +601,13 @@ export const layer: Layer.Layer<
       }
 
       yield* runStartScripts(worktreePath, { projectID: ctx.project.id }).pipe(
-        Effect.catchCause((cause) => Effect.sync(() => log.error("worktree start task failed", { cause }))),
+        Effect.catchCause((cause) =>
+          Effect.sync(() =>
+            Effect.logError("worktree start task failed").pipe(
+              Effect.annotateLogs({ service: "worktree", ...{ cause } }),
+            ),
+          ),
+        ),
         Effect.forkIn(scope),
       )
 

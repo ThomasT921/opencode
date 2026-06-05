@@ -1,14 +1,10 @@
 import type { AgentSideConnection, Usage } from "@agentclientprotocol/sdk"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import type { AssistantMessage as OpenCodeAssistantMessage, Message } from "@opencode-ai/sdk/v2"
 import { InstanceRef } from "@/effect/instance-ref"
 import { InstanceStore } from "@/project/instance-store"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Provider } from "@/provider/provider"
 import { Context, Effect, Layer, SynchronizedRef } from "effect"
-
-const log = EffectLogger.create({ service: "acp-next-usage" })
-
 export type AssistantTokenCost = Pick<OpenCodeAssistantMessage, "cost" | "tokens">
 
 export type AssistantMessage = AssistantTokenCost &
@@ -157,7 +153,6 @@ export const layer = Layer.effect(
               Effect.map((providers) => findContextLimit(providers, input.providerID, input.modelID)),
               Effect.catch((error) =>
                 Effect.sync(() => {
-                  log.error("failed to get providers for usage context limit", { error })
                   return undefined
                 }),
               ),
@@ -184,7 +179,6 @@ export const layer = Layer.effect(
       const messages = yield* messageLoader.messages({ sessionID: input.sessionID, directory: input.directory }).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
-            log.error("failed to fetch messages for usage update", { error })
             return undefined
           }),
         ),
@@ -213,9 +207,7 @@ export const layer = Layer.effect(
               cost: { amount: totalSessionCost(messages), currency: "USD" },
             },
           })
-          .catch((error) => {
-            log.error("failed to send usage update", { error })
-          }),
+          .catch((error) => {}),
       )
     })
 

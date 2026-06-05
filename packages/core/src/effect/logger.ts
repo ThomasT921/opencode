@@ -6,7 +6,6 @@ import * as Global from "../global"
 import { ensureProcessMetadata } from "../util/opencode-process"
 
 type Fields = Record<string, unknown>
-type FieldInput = object
 
 export const Level = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate({
   identifier: "LogLevel",
@@ -23,29 +22,12 @@ const levelPriority: Record<Level, number> = {
 
 const normalizeKey = (key: string) => (key === "sessionID" ? "session.id" : key)
 
-export interface Handle {
-  readonly debug: (msg?: unknown, extra?: FieldInput) => Effect.Effect<void>
-  readonly info: (msg?: unknown, extra?: FieldInput) => Effect.Effect<void>
-  readonly warn: (msg?: unknown, extra?: FieldInput) => Effect.Effect<void>
-  readonly error: (msg?: unknown, extra?: FieldInput) => Effect.Effect<void>
-  readonly tag: (key: string, value: string) => Handle
-  readonly with: (extra: FieldInput) => Handle
-  readonly clone: () => Handle
-  readonly time: (message: string, extra?: Fields) => { stop(): void; [Symbol.dispose](): void }
-}
-
-const clean = (input?: FieldInput): Fields =>
+const clean = (input?: object): Fields =>
   Object.fromEntries(
     Object.entries(input ?? {})
       .filter((entry) => entry[1] !== undefined && entry[1] !== null)
       .map(([key, value]) => [normalizeKey(key), value]),
   )
-
-const call = (run: (msg: string) => Effect.Effect<void>, base: FieldInput, msg?: unknown, extra?: FieldInput) => {
-  const ann = clean({ ...base, ...extra })
-  const fx = run(stringifyMessage(msg))
-  return Object.keys(ann).length ? Effect.annotateLogs(fx, ann) : fx
-}
 
 export function file() {
   if (disabled(process.env.OPENCODE_LOG_FILE)) return ""
@@ -91,7 +73,7 @@ function build(inputLevel: Level, ts: Date, message: unknown, fields: Fields): {
   }
 }
 
-export const logger = Logger.make((opts) => {
+const logger = Logger.make((opts) => {
   const extra = clean(opts.fiber.getRef(References.CurrentLogAnnotations))
   const now = opts.date.getTime()
   for (const [key, start] of opts.fiber.getRef(References.CurrentLogSpans)) {
@@ -118,28 +100,22 @@ export const logger = Logger.make((opts) => {
   }
 })
 
-export const layer = Logger.layer([logger], { mergeWithExisting: false }).pipe(
-  Layer.tap(() =>
-    Effect.promise(async () => {
-      const target = file()
-      if (target) await fs.mkdir(path.dirname(target), { recursive: true })
-    }),
-  ),
-)
+type LoggerInput = Logger.Logger<unknown, unknown> | Effect.Effect<Logger.Logger<unknown, unknown>, unknown, unknown>
 
-export const create = (base: FieldInput = {}): Handle => ({
-  debug: (msg, extra) => call((item) => Effect.logDebug(item), base, msg, extra),
-  info: (msg, extra) => call((item) => Effect.logInfo(item), base, msg, extra),
-  warn: (msg, extra) => call((item) => Effect.logWarning(item), base, msg, extra),
-  error: (msg, extra) => call((item) => Effect.logError(item), base, msg, extra),
-  tag: (key, value) => create({ ...base, [key]: value }),
-  with: (extra) => create({ ...base, ...extra }),
-  clone: () => create({ ...base }),
-  time: () => ({
-    stop() {},
-    [Symbol.dispose]() {},
-  }),
-})
+const makeLayer = <const Loggers extends ReadonlyArray<LoggerInput>>(loggers: Loggers) =>
+  Logger.layer(loggers, { mergeWithExisting: false }).pipe(
+    Layer.tap(() =>
+      Effect.promise(async () => {
+        const target = file()
+        if (target) await fs.mkdir(path.dirname(target), { recursive: true })
+      }),
+    ),
+  )
+
+export const layer = makeLayer([logger])
+
+export const layerWith = <const Loggers extends ReadonlyArray<LoggerInput>>(loggers: Loggers) =>
+  makeLayer([logger, ...loggers] as const)
 
 function truthy(value: string | undefined) {
   return value?.toLowerCase() === "1" || value?.toLowerCase() === "true"

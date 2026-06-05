@@ -3,15 +3,11 @@ import { Bus } from "../bus"
 import { Snapshot } from "../snapshot"
 import { Storage } from "@/storage/storage"
 import { SyncEvent } from "../sync"
-import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
-
-const log = EffectLogger.create({ service: "session.revert" })
-
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
   messageID: MessageID,
@@ -91,7 +87,7 @@ export const layer = Layer.effect(
     })
 
     const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
-      log.info("unreverting", input)
+      yield* Effect.logInfo("unreverting").pipe(Effect.annotateLogs({ service: "session.revert", ...input }))
       yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (!session.revert) return session
