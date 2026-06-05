@@ -79,12 +79,14 @@ export const layer = Layer.effectDiscard(
             return yield* filesystem.readResolved(final.target, FileSystem.MAX_READ_BYTES)
           }).pipe(
             Effect.catchCause((cause) =>
-              Effect.fail(
-                new ToolFailure({
-                  message: `Unable to read ${"resource" in input ? input.resource : input.path}`,
-                  error: Cause.squash(cause),
-                }),
-              ),
+              Effect.gen(function* () {
+                const error = Cause.squash(cause)
+                const message =
+                  error instanceof FileSystem.BinaryFileError || error instanceof FileSystem.ReadLimitError
+                    ? error.message
+                    : `Unable to read ${"resource" in input ? input.resource : input.path}`
+                return yield* new ToolFailure({ message, error })
+              }),
             ),
           )
         },

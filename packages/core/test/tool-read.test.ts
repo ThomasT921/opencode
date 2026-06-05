@@ -21,6 +21,7 @@ let listReal = "/project/src"
 let size = 5
 let real = "/project/README.md"
 let afterApproval = () => {}
+let readFailure: unknown
 const resourceReads: ToolOutputStore.ReadInput[] = []
 const filesystem = Layer.succeed(
   FileSystem.Service,
@@ -67,22 +68,26 @@ const filesystem = Layer.succeed(
         ),
       ),
     readResolved: () =>
-      Effect.sync(() => {
-        reads.push({ path: RelativePath.make("README.md") })
-        return new FileSystem.TextContent({ type: "text", content: "hello", mime: "text/plain" })
-      }),
+      readFailure === undefined
+        ? Effect.sync(() => {
+            reads.push({ path: RelativePath.make("README.md") })
+            return new FileSystem.TextContent({ type: "text", content: "hello", mime: "text/plain" })
+          })
+        : Effect.die(readFailure),
     readTextPageResolved: (_target, page = {}) =>
-      Effect.sync(() => {
-        textPageInputs.push(page)
-        return new FileSystem.TextPage({
-          type: "text-page",
-          content: "hello",
-          mime: "text/plain",
-          offset: page.offset ?? 1,
-          truncated: true,
-          next: (page.offset ?? 1) + 1,
-        })
-      }),
+      readFailure === undefined
+        ? Effect.sync(() => {
+            textPageInputs.push(page)
+            return new FileSystem.TextPage({
+              type: "text-page",
+              content: "hello",
+              mime: "text/plain",
+              offset: page.offset ?? 1,
+              truncated: true,
+              next: (page.offset ?? 1) + 1,
+            })
+          })
+        : Effect.die(readFailure),
     resolveRoot: () => Effect.die("unused"),
     revalidateRoot: Effect.succeed,
     list: () => Effect.die("unused"),
@@ -167,6 +172,7 @@ describe("ReadTool", () => {
       size = 5
       real = "/project/README.md"
       afterApproval = () => {}
+      readFailure = undefined
       resolvedInput = undefined
       const registry = yield* ToolRegistry.Service
 
@@ -357,6 +363,7 @@ describe("ReadTool", () => {
       size = FileSystem.MAX_READ_BYTES + 1
       real = "/project/large.txt"
       afterApproval = () => {}
+      readFailure = undefined
       const registry = yield* ToolRegistry.Service
 
       expect(
@@ -374,6 +381,26 @@ describe("ReadTool", () => {
         value: { type: "text-page", content: "hello", mime: "text/plain", offset: 2, truncated: true, next: 3 },
       })
       expect(textPageInputs).toEqual([{ offset: 2, limit: 1 }])
+    }),
+  )
+
+  it.effect("reports the binary file that cannot be paged", () =>
+    Effect.gen(function* () {
+      allow = true
+      resolveFailure = undefined
+      listResolveFailure = new Error("not a directory")
+      size = FileSystem.MAX_READ_BYTES + 1
+      real = "/project/archive.zip"
+      afterApproval = () => {}
+      readFailure = new FileSystem.BinaryFileError("archive.zip")
+      const registry = yield* ToolRegistry.Service
+
+      expect(
+        yield* registry.execute({
+          sessionID,
+          call: { type: "tool-call", id: "call-binary", name: "read", input: { path: "archive.zip" } },
+        }),
+      ).toEqual({ type: "error", value: "Cannot read binary file: archive.zip" })
     }),
   )
 

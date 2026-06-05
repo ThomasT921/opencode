@@ -25,6 +25,28 @@ export const MAX_READ_BYTES = 50 * 1024
 const MAX_LINE_LENGTH = 2_000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 
+export class ReadLimitError extends Error {
+  readonly resource: string
+  readonly maximumBytes: number
+
+  constructor(resource: string, maximumBytes: number) {
+    super(`File exceeds ${maximumBytes} byte read limit: ${resource}`)
+    this.name = "ReadLimitError"
+    this.resource = resource
+    this.maximumBytes = maximumBytes
+  }
+}
+
+export class BinaryFileError extends Error {
+  readonly resource: string
+
+  constructor(resource: string) {
+    super(`Cannot read binary file: ${resource}`)
+    this.name = "BinaryFileError"
+    this.resource = resource
+  }
+}
+
 export class TextContent extends Schema.Class<TextContent>("FileSystem.TextContent")({
   type: Schema.Literal("text"),
   content: Schema.String,
@@ -315,11 +337,10 @@ export const layer = Layer.effect(
           if (info.type !== "File") return yield* Effect.die(new Error("Path is not a file"))
           if (info.dev !== target.dev || Option.getOrUndefined(info.ino) !== target.ino)
             return yield* Effect.die(new Error("File changed after permission approval"))
-          if (info.size > maximumBytes)
-            return yield* Effect.die(new Error(`File exceeds ${maximumBytes} byte read limit`))
+          if (info.size > maximumBytes) return yield* Effect.die(new ReadLimitError(target.resource, maximumBytes))
           const bytes = yield* file.readAlloc(maximumBytes + 1).pipe(Effect.orDie)
           if (bytes._tag === "Some" && bytes.value.length > maximumBytes)
-            return yield* Effect.die(new Error(`File exceeds ${maximumBytes} byte read limit`))
+            return yield* Effect.die(new ReadLimitError(target.resource, maximumBytes))
           return yield* content(target, bytes._tag === "Some" ? bytes.value : new Uint8Array())
         }),
       )
@@ -376,7 +397,7 @@ export const layer = Layer.effect(
           while (!done) {
             const chunk = yield* file.readAlloc(64 * 1024).pipe(Effect.orDie)
             if (Option.isNone(chunk)) break
-            if (chunk.value.includes(0)) return yield* Effect.die(new Error("Cannot page binary file"))
+            if (chunk.value.includes(0)) return yield* Effect.die(new BinaryFileError(target.resource))
             let text = decoder.decode(chunk.value, { stream: true })
             while (true) {
               const index = text.indexOf("\n")
