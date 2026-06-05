@@ -631,6 +631,39 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("does not create a source Location epoch after a concurrent Session move", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      let moved = false
+      systemLoadHook = Effect.suspend(() => {
+        if (moved) return Effect.void
+        moved = true
+        return events
+          .publish(SessionEvent.Moved, {
+            sessionID,
+            timestamp: DateTime.makeUnsafe(1),
+            location: { directory: AbsolutePath.make("/moved") },
+          })
+          .pipe(Effect.asVoid)
+      })
+      yield* session.prompt({ sessionID, prompt: new Prompt({ text: "First" }), resume: false })
+
+      expect(Exit.isFailure(yield* session.resume(sessionID).pipe(Effect.exit))).toBe(true)
+      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(true)
+      expect(
+        yield* db
+          .select()
+          .from(SessionContextEpochTable)
+          .where(eq(SessionContextEpochTable.session_id, sessionID))
+          .get(),
+      ).toBeUndefined()
+      expect((yield* session.get(sessionID)).location.directory).toBe(AbsolutePath.make("/moved"))
+    }),
+  )
+
   it.effect("reuses one durable baseline after the context producer changes", () =>
     Effect.gen(function* () {
       yield* setup

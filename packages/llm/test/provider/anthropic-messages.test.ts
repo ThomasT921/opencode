@@ -168,6 +168,25 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
+  it.effect("rejects a system update between a local tool call and its result", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.prepare(
+        LLM.request({
+          model: opus48,
+          messages: [
+            Message.user("Use the tool."),
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+            Message.system("Too early."),
+            Message.tool({ id: "call_1", name: "lookup", result: "Done." }),
+          ],
+          cache: "none",
+        }),
+      ).pipe(Effect.flip)
+
+      expect(error.message).toContain("system updates cannot split a local tool call from its tool result")
+    }),
+  )
+
   it.effect("prepares tool call and tool result messages", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
