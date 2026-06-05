@@ -102,12 +102,12 @@ test("brackets navigate diff hunks", async () => {
   }
 })
 
-async function renderDiffViewer(vcsDiff: unknown[], height = 20) {
+async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: TuiRouteCurrent) {
   const commands = new Map<
     string,
     NonNullable<Parameters<TuiPluginApi["keymap"]["registerLayer"]>[0]["commands"]>[number]
   >()
-  let current = startRoute
+  let current = initialRoute ?? startRoute
   let renderDiff: TuiRouteDefinition["render"] | undefined
   let vcsDiffInput: unknown
   const config = createTuiResolvedConfig()
@@ -156,7 +156,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20) {
     } satisfies TuiPluginApi
 
     void diffViewerPlugin.tui(api, undefined, pluginMeta)
-    commands.get("diff.open")?.run?.({} as never)
+    if (!initialRoute) commands.get("diff.open")?.run?.({} as never)
 
     return (
       <OpencodeKeymapProvider keymap={keymap}>
@@ -205,67 +205,18 @@ const session = {
 } satisfies Session
 
 test("branch diff source requests branch VCS diff", async () => {
-  const calls: Parameters<TuiPluginApi["client"]["vcs"]["diff"]>[0][] = []
-  const current: TuiRouteCurrent = { name: "diff", params: { mode: "branch", sessionID: "session-1" } }
-  let renderDiff: TuiRouteDefinition["render"] | undefined
-  await mkdir(Global.Path.state, { recursive: true })
-  await Bun.write(path.join(Global.Path.state, "kv.json"), "{}")
-
-  function Harness() {
-    const renderer = useRenderer()
-    const keymap = createDefaultOpenTuiKeymap(renderer)
-    const base = createTuiPluginApi({
-      keymap,
-      client: {
-        vcs: {
-          diff: async (parameters: Parameters<TuiPluginApi["client"]["vcs"]["diff"]>[0]) => {
-            calls.push(parameters)
-            return { data: [] }
-          },
-        },
-        session: { diff: async () => ({ data: [] }) },
-      } as unknown as TuiPluginApi["client"],
-      state: {
-        session: {
-          get: () => session,
-        },
-      },
-    })
-    const api = {
-      ...base,
-      route: {
-        register(routes) {
-          renderDiff = routes.find((route) => route.name === "diff")?.render
-          return () => {}
-        },
-        navigate() {},
-        get current() {
-          return current
-        },
-      },
-    } satisfies TuiPluginApi
-
-    void diffViewerPlugin.tui(api, undefined, pluginMeta)
-
-    return (
-      <OpencodeKeymapProvider keymap={keymap}>
-        <TuiConfigProvider config={createTuiResolvedConfig()}>
-          <KVProvider>
-            <ThemeProvider mode="dark">
-              {renderDiff?.({ params: "params" in current ? current.params : undefined })}
-            </ThemeProvider>
-          </KVProvider>
-        </TuiConfigProvider>
-      </OpencodeKeymapProvider>
-    )
-  }
-
-  const app = await testRender(() => <Harness />, { width: 80, height: 20 })
+  const viewer = await renderDiffViewer([], 20, {
+    name: "diff",
+    params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute },
+  })
   try {
-    await waitForCall(app, calls)
-    expect(calls[0]).toEqual({ directory: "/repo/session", mode: "branch", context: 12 })
+    expect(viewer.current()).toEqual({
+      name: "diff",
+      params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute },
+    })
+    expect(viewer.vcsDiffInput()).toEqual({ directory: "/repo/session", mode: "branch", context: 12 })
   } finally {
-    app.renderer.destroy()
+    viewer.app.renderer.destroy()
   }
 })
 
@@ -277,14 +228,6 @@ async function waitForCommand(
   for (let attempt = 0; attempt < 10; attempt++) {
     await app.renderOnce()
     if (commands.has(command)) return
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-}
-
-async function waitForCall(app: Awaited<ReturnType<typeof testRender>>, calls: unknown[]) {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await app.renderOnce()
-    if (calls.length > 0) return
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
 }
