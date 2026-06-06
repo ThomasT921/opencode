@@ -64,7 +64,11 @@ const maxSeq = (left: number | undefined, right: number | undefined) => {
 /** Constructs a scoped coordinator. Every in-memory transition is synchronous. */
 export const make = <Key, A, E>(options: {
   readonly drain: (key: Key, mode: Mode) => Effect.Effect<A, E>
-  readonly onFailure?: (key: Key, cause: Cause.Cause<E>) => Effect.Effect<void>
+  readonly onFailure?: (
+    key: Key,
+    cause: Cause.Cause<E>,
+    context: { readonly mode: "wake"; readonly seq?: number },
+  ) => Effect.Effect<void>
 }): Effect.Effect<Coordinator<Key, A, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<A, E>>()
@@ -166,7 +170,7 @@ export const make = <Key, A, E>(options: {
         successor === undefined &&
         options.onFailure !== undefined
       ) {
-        report(Effect.suspend(() => options.onFailure!(key, exit.cause)))
+        report(Effect.suspend(() => options.onFailure!(key, exit.cause, { mode: "wake", seq: demand.seq })))
       }
     }
 
