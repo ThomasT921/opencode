@@ -94,6 +94,7 @@ describe("SessionV2.create", () => {
   it.effect("stores supplied immutable create attributes", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
+      const parentID = SessionV2.ID.make("ses_parent")
       const workspaceID = WorkspaceV2.ID.make("wrk_test")
       const model = ModelV2.Ref.make({
         id: ModelV2.ID.make("sonnet"),
@@ -104,10 +105,11 @@ describe("SessionV2.create", () => {
       expect(
         yield* session.create({
           location: Location.Ref.make({ directory: location.directory, workspaceID }),
+          parentID,
           agent: AgentV2.ID.make("build"),
           model,
         }),
-      ).toMatchObject({ location: { directory: location.directory, workspaceID }, agent: "build", model })
+      ).toMatchObject({ parentID, location: { directory: location.directory, workspaceID }, agent: "build", model })
     }),
   )
 

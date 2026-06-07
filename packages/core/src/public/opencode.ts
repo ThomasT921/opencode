@@ -2,6 +2,7 @@ export * as OpenCode from "./opencode"
 
 import { Context, Effect, Layer } from "effect"
 import { Catalog } from "../catalog"
+import { AgentV2 } from "../agent"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { LocationServiceMap } from "../location-layer"
@@ -12,12 +13,13 @@ import * as SessionExecutionLocal from "../session/execution/local"
 import { SessionProjector } from "../session/projector"
 import { SessionStore } from "../session/store"
 import { ApplicationTools } from "../tool/application-tools"
+import { TaskTool } from "../tool/task"
 import { Session } from "./session"
 import { Tool } from "./tool"
 
 export interface Interface {
-  readonly sessions: Session.Interface
-  readonly tools: Tool.Interface
+  readonly session: Session.Interface
+  readonly tool: Tool.Interface
 }
 
 /** Intentional public native API for Effect applications embedding OpenCode. */
@@ -77,7 +79,7 @@ const SessionsLayer = Layer.merge(
     Layer.orDie,
   ),
   SessionModelValidationLayer,
-).pipe(Layer.provide(LocationServicesLayer))
+).pipe(Layer.provideMerge(LocationServicesLayer))
 const ApplicationToolsLayer = ApplicationTools.layer
 
 // TODO: Accept explicit storage so tests and embeddings can select disposable or application-owned persistence.
@@ -85,14 +87,24 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sessions = yield* SessionV2.Service
+    const locations = yield* LocationServiceMap
     const tools = yield* ApplicationTools.Service
     const validation = yield* SessionModelValidation
+    yield* tools.attach({
+      task: yield* TaskTool.make(sessions, (location, id) =>
+        AgentV2.Service.pipe(
+          Effect.flatMap((agents) => agents.get(id)),
+          Effect.provide(locations.get(location)),
+        ),
+      ),
+    })
     return Service.of({
-      tools: { register: tools.register },
-      sessions: {
+      tool: { register: tools.register },
+      session: {
         create: (input) =>
           sessions.create({
             id: input.id,
+            parentID: input.parentID,
             agent: input.agent,
             model: input.model,
             location: input.location,
@@ -111,7 +123,9 @@ export const layer = Layer.effect(
             sessionID: input.sessionID,
             prompt: input.prompt,
             delivery: input.delivery,
+            resume: input.resume,
           }),
+        resume: sessions.resume,
         messages: (input) =>
           sessions.messages({
             sessionID: input.sessionID,

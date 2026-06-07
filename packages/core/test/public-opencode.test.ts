@@ -13,9 +13,9 @@ describe("public native OpenCode API", () => {
     Effect.gen(function* () {
       const opencode = yield* OpenCode.Service
 
-      expect(Object.keys(opencode).sort()).toEqual(["sessions", "tools"])
+      expect(Object.keys(opencode).sort()).toEqual(["session", "tool"])
 
-      expect(Object.keys(opencode.sessions).sort()).toEqual([
+      expect(Object.keys(opencode.session).sort()).toEqual([
         "context",
         "create",
         "events",
@@ -25,12 +25,13 @@ describe("public native OpenCode API", () => {
         "message",
         "messages",
         "prompt",
+        "resume",
         "switchModel",
       ])
       expect(Session.ID.create()).toStartWith("ses_")
       expect(Session.MessageID.create()).toStartWith("msg_")
-      expect(yield* opencode.sessions.list()).toBeArray()
-      yield* opencode.tools.register({
+      expect(yield* opencode.session.list()).toBeArray()
+      yield* opencode.tool.register({
         public_tool: Tool.make({
           description: "Public tool",
           input: Schema.Struct({}),
@@ -52,14 +53,14 @@ describe("public native OpenCode API", () => {
           const opencode = yield* OpenCode.Service
           const sessionID = Session.ID.make("ses_public_switch_available")
           const model = ref({ variant: "fast" })
-          yield* opencode.sessions.create({
+          yield* opencode.session.create({
             id: sessionID,
             location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
           })
 
-          yield* opencode.sessions.switchModel({ sessionID, model })
+          yield* opencode.session.switchModel({ sessionID, model })
 
-          expect((yield* opencode.sessions.get(sessionID)).model).toEqual(model)
+          expect((yield* opencode.session.get(sessionID)).model).toEqual(model)
         }),
       ),
     ),
@@ -77,27 +78,27 @@ describe("public native OpenCode API", () => {
           const opencode = yield* OpenCode.Service
           const availableID = Session.ID.make("ses_public_switch_exact_available")
           const disabledID = Session.ID.make("ses_public_switch_exact_disabled")
-          yield* opencode.sessions.create({
+          yield* opencode.session.create({
             id: availableID,
             location: Location.Ref.make({ directory: AbsolutePath.make(available.path) }),
           })
-          yield* opencode.sessions.create({
+          yield* opencode.session.create({
             id: disabledID,
             location: Location.Ref.make({ directory: AbsolutePath.make(disabled.path) }),
           })
 
-          yield* opencode.sessions.switchModel({ sessionID: availableID, model: ref({ variant: "default" }) })
-          const disabledError = yield* opencode.sessions
+          yield* opencode.session.switchModel({ sessionID: availableID, model: ref({ variant: "default" }) })
+          const disabledError = yield* opencode.session
             .switchModel({ sessionID: disabledID, model: ref() })
             .pipe(Effect.flip)
-          const missingError = yield* opencode.sessions
+          const missingError = yield* opencode.session
             .switchModel({ sessionID: disabledID, model: ref({ id: "missing" }) })
             .pipe(Effect.flip)
 
           expect(disabledError).toBeInstanceOf(Session.ModelUnavailableError)
           expect(missingError).toBeInstanceOf(Session.ModelUnavailableError)
-          expect((yield* opencode.sessions.get(availableID)).model).toEqual(ref({ variant: "default" }))
-          expect((yield* opencode.sessions.get(disabledID)).model).toBeUndefined()
+          expect((yield* opencode.session.get(availableID)).model).toEqual(ref({ variant: "default" }))
+          expect((yield* opencode.session.get(disabledID)).model).toBeUndefined()
         }),
       ),
     ),
@@ -114,18 +115,18 @@ describe("public native OpenCode API", () => {
           const opencode = yield* OpenCode.Service
           const sessionID = Session.ID.make("ses_public_switch_variant")
           const selected = ref({ variant: "fast" })
-          yield* opencode.sessions.create({
+          yield* opencode.session.create({
             id: sessionID,
             location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
           })
-          yield* opencode.sessions.switchModel({ sessionID, model: selected })
+          yield* opencode.session.switchModel({ sessionID, model: selected })
 
-          const error = yield* opencode.sessions
+          const error = yield* opencode.session
             .switchModel({ sessionID, model: ref({ variant: "unknown" }) })
             .pipe(Effect.flip)
 
           expect(error).toBeInstanceOf(Session.VariantUnavailableError)
-          expect((yield* opencode.sessions.get(sessionID)).model).toEqual(selected)
+          expect((yield* opencode.session.get(sessionID)).model).toEqual(selected)
         }),
       ),
     ),
@@ -135,7 +136,7 @@ describe("public native OpenCode API", () => {
     Effect.gen(function* () {
       const opencode = yield* OpenCode.Service
       const sessionID = Session.ID.make("ses_public_switch_missing")
-      const error = yield* opencode.sessions
+      const error = yield* opencode.session
         .switchModel({
           sessionID,
           model: Schema.decodeUnknownSync(Model.Ref)({ id: "claude-sonnet-4-5", providerID: "anthropic" }),

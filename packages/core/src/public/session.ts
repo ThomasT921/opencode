@@ -9,6 +9,7 @@ import { SessionEvent } from "../session/event"
 import { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
 import { Prompt } from "../session/prompt"
+import type { SessionRunner } from "../session/runner"
 import { Agent } from "./agent"
 import { Location } from "./location"
 import { Model } from "./model"
@@ -65,6 +66,7 @@ export { MessageDecodeError }
 
 export interface CreateInput {
   readonly id?: ID
+  readonly parentID?: ID
   readonly agent?: Agent.ID
   readonly model?: Model.Ref
   readonly location: Location.Ref
@@ -75,6 +77,8 @@ export interface PromptInput {
   readonly sessionID: ID
   readonly prompt: Prompt
   readonly delivery?: Delivery
+  /** Admit durably without scheduling execution. */
+  readonly resume?: boolean
 }
 
 export interface SwitchModelInput {
@@ -107,6 +111,8 @@ export interface Interface {
   readonly get: (sessionID: ID) => Effect.Effect<Info, NotFoundError>
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly prompt: (input: PromptInput) => Effect.Effect<Admission, NotFoundError | PromptConflictError>
+  /** Explicitly drain one Session and wait for the current execution chain to settle. */
+  readonly resume: (sessionID: ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly switchModel: (
     input: SwitchModelInput,
   ) => Effect.Effect<void, NotFoundError | ModelUnavailableError | VariantUnavailableError>
