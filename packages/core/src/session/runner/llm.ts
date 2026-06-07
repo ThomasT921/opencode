@@ -108,7 +108,7 @@ export const layer = Layer.effect(
       while (openActivity) {
         let needsContinuation = true
         for (let step = 0; step < MAX_STEPS; step++) {
-          needsContinuation = yield* runTurn(input.sessionID, promotion)
+          needsContinuation = yield* runTurn({ sessionID: input.sessionID, delivery: promotion })
           promotion = "steer"
           if (!needsContinuation) needsContinuation = yield* SessionInput.hasPending(db, input.sessionID, "steer")
           if (!needsContinuation) break
