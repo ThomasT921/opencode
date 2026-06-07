@@ -65,8 +65,11 @@ test("centralizes file and directory selection policy", () => {
   expect(directory.includeFiles).toBeFalse()
   expect(directory.selection("/repo", "src/")).toBe("/repo/src")
   expect(directory.selection("C:/Users/luke", "repos/")).toBe("C:\\Users\\luke\\repos")
+  expect(directory.selection("//Server/Share", "repo/")).toBe("\\\\Server\\Share\\repo")
   expect(directory.navigation("/tmp")).toBe("/tmp")
   expect(directory.result("/repo", "")).toBe("/repo")
+  expect(directory.result("C:/Users/luke", "")).toBe("C:\\Users\\luke")
+  expect(directory.result("//Server/Share/repo", "")).toBe("\\\\Server\\Share\\repo")
   expect(directory.result("/repo", "", false)).toBeUndefined()
 })
 

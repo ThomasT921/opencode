@@ -55,7 +55,7 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
     },
     result(root: string, selected: string, valid = true) {
       if (!valid) return
-      return selected || root || undefined
+      return selected || (root ? nativePickerPath(root) : undefined)
     },
     selection(root: string, path: string) {
       return selectedTreePath(root, path, "directory")
@@ -166,7 +166,7 @@ export function selectedTreePath(root: string, path: string, mode: "directory" |
 
 export function nativePickerPath(path: string) {
   const value = trimPickerPath(path)
-  if (/^[A-Za-z]:\//.test(value)) return value.replaceAll("/", "\\")
+  if (/^[A-Za-z]:\//.test(value) || value.startsWith("//")) return value.replaceAll("/", "\\")
   return value
 }
 import { getFilename } from "@opencode-ai/core/util/path"
