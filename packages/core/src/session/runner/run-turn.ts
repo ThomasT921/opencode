@@ -18,7 +18,7 @@ import {
   isContextOverflowFailure,
   type ProviderErrorEvent,
 } from "@opencode-ai/llm"
-import { Cause, DateTime, Effect, FiberSet, Option, Schema, Semaphore, Stream } from "effect"
+import { DateTime, Effect, Schema, Semaphore, Stream } from "effect"
 import { AgentV2 } from "../../agent"
 import { Config } from "../../config"
 import { Database } from "../../database/database"
@@ -26,11 +26,9 @@ import { EventV2 } from "../../event"
 import { Location } from "../../location"
 import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
-import { QuestionV2 } from "../../question"
 import { SkillGuidance } from "../../skill/guidance"
 import { SystemContext } from "../../system-context/index"
 import { SystemContextRegistry } from "../../system-context/registry"
-import { ToolOutputStore } from "../../tool-output-store"
 import { ToolRegistry } from "../../tool/registry"
 import { SessionCompaction } from "../compaction"
 import { SessionContextEpoch } from "../context-epoch"
@@ -42,6 +40,7 @@ import { SessionStore } from "../store"
 import type { RunError } from "./index"
 import { SessionRunnerModel } from "./model"
 import { createLLMEventPublisher } from "./publish-llm-event"
+import { SettleProviderTurn } from "./settle-provider-turn"
 import { toLLMMessages } from "./to-llm-message"
 
 export interface Input {
@@ -73,10 +72,6 @@ export const make = Effect.gen(function* () {
     if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
     return session
   })
-  const awaitToolFibers = (fibers: FiberSet.FiberSet<void, ToolOutputStore.Error>) =>
-    Effect.raceFirst(FiberSet.join(fibers), FiberSet.awaitEmpty(fibers))
-  const isQuestionRejected = (cause: Cause.Cause<unknown>) =>
-    cause.reasons.some((reason) => Cause.isDieReason(reason) && reason.defect instanceof QuestionV2.RejectedError)
   const stale = Symbol("stale turn preparation")
   const retryAgentMismatch = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -181,21 +176,19 @@ export const make = Effect.gen(function* () {
       withPublication(publisher.publish(event, outputPaths))
     const failUnsettled = (message: string, providerExecuted = false) =>
       withPublication(publisher.failUnsettledTools(message, providerExecuted))
-    const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
     let needsContinuation = false
     let overflowFailure: ProviderErrorEvent | undefined
-    const startTool = Effect.fnUntraced(function* (event: Extract<LLMEvent, { readonly type: "tool-call" }>) {
+    const toolEffect = Effect.fnUntraced(function* (event: Extract<LLMEvent, { readonly type: "tool-call" }>) {
       needsContinuation = true
       const assistantMessageID = yield* publisher.assistantMessageID(event.id)
-      yield* Effect.uninterruptibleMask((restore) =>
-        restore(
-          prepared.toolMaterialization.settle({
-            sessionID: prepared.session.id,
-            agent: prepared.agent.id,
-            assistantMessageID,
-            call: event,
-          }),
-        ).pipe(
+      return yield* prepared.toolMaterialization
+        .settle({
+          sessionID: prepared.session.id,
+          agent: prepared.agent.id,
+          assistantMessageID,
+          call: event,
+        })
+        .pipe(
           Effect.flatMap((settlement) =>
             publish(
               LLMEvent.toolResult({
@@ -207,85 +200,67 @@ export const make = Effect.gen(function* () {
               settlement.outputPaths ?? [],
             ),
           ),
-        ),
-      ).pipe(FiberSet.run(toolFibers))
+        )
     })
-    const providerStream = llm.stream(prepared.request).pipe(
-      Stream.runForEach((event) =>
+    const result = yield* SettleProviderTurn.run({
+      stream: (runTool) =>
+        llm.stream(prepared.request).pipe(
+          Stream.runForEach((event) =>
+            Effect.gen(function* () {
+              if (overflowFailure || publisher.hasProviderError()) return
+              if (
+                LLMEvent.is.providerError(event) &&
+                isContextOverflowFailure(event) &&
+                !publisher.hasAssistantStarted()
+              ) {
+                overflowFailure = event
+                return
+              }
+              yield* publish(event)
+              if (event.type !== "tool-call" || event.providerExecuted) return
+              yield* runTool(toolEffect(event))
+            }),
+          ),
+          Effect.ensuring(withPublication(publisher.flush())),
+        ),
+      recoverOverflow: (failure, restore) =>
         Effect.gen(function* () {
-          if (overflowFailure || publisher.hasProviderError()) return
-          if (LLMEvent.is.providerError(event) && isContextOverflowFailure(event) && !publisher.hasAssistantStarted()) {
-            overflowFailure = event
-            return
-          }
-          yield* publish(event)
-          if (event.type !== "tool-call" || event.providerExecuted) return
-          yield* startTool(event)
-        }),
-      ),
-      Effect.ensuring(withPublication(publisher.flush())),
-    )
-
-    // Keep cleanup protected after the response ends so no started tool is
-    // forgotten, while the response stream and tool work remain interruptible.
-    return yield* Effect.uninterruptibleMask((restore) =>
-      Effect.gen(function* () {
-        const stream = yield* restore(providerStream).pipe(Effect.exit)
-        const failure =
-          stream._tag === "Failure" ? Option.getOrUndefined(Cause.findErrorOption(stream.cause)) : undefined
-        if (
-          canRecoverOverflow &&
-          !publisher.hasAssistantStarted() &&
-          isContextOverflowFailure(overflowFailure ?? failure) &&
-          (yield* restore(
+          if (!canRecoverOverflow || publisher.hasAssistantStarted()) return false
+          if (!isContextOverflowFailure(overflowFailure ?? failure)) return false
+          return yield* restore(
             compaction.compactAfterOverflow({
               sessionID: prepared.session.id,
               entries: prepared.entries,
               model: prepared.model,
               request: prepared.request,
             }),
-          ))
-        )
-          return AttemptResult.cases.CompactedOverflow.make({})
-        if (overflowFailure) yield* publish(overflowFailure)
-        const llmFailure = failure instanceof LLMError ? failure : undefined
-        if (llmFailure && !publisher.hasProviderError()) {
-          yield* failUnsettled("Provider did not return a tool result", true)
-          yield* withPublication(
-            events.publish(SessionEvent.Step.Failed, {
-              sessionID: prepared.session.id,
-              timestamp: yield* DateTime.now,
-              assistantMessageID: yield* publisher.startAssistant(),
-              error: { type: "unknown", message: llmFailure.reason.message },
-            }),
           )
-        }
-        const streamInterrupted = stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)
-        if (streamInterrupted) yield* FiberSet.clear(toolFibers)
-        const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
-        if (settled._tag === "Failure" && isQuestionRejected(settled.cause)) {
-          yield* FiberSet.clear(toolFibers)
-          yield* failUnsettled("Tool execution interrupted")
-          return yield* Effect.interrupt
-        }
-        const toolInterrupted = settled._tag === "Failure" && Cause.hasInterrupts(settled.cause)
-        if (toolInterrupted) yield* FiberSet.clear(toolFibers)
-        if (streamInterrupted || toolInterrupted || publisher.hasProviderError())
-          yield* failUnsettled("Tool execution interrupted")
-        if (settled._tag === "Failure" && !toolInterrupted) {
-          const failure = Cause.squash(settled.cause)
-          const message = failure instanceof Error ? failure.message : String(failure)
-          yield* failUnsettled(`Tool execution failed: ${message}`)
-        }
-        if (stream._tag === "Success" && !publisher.hasProviderError())
-          yield* failUnsettled("Provider did not return a tool result", true)
-        if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
-        if (settled._tag === "Failure") return yield* Effect.failCause(settled.cause)
-        return AttemptResult.cases.Complete.make({
+        }),
+      projectProviderFailure: (failure) =>
+        Effect.gen(function* () {
+          if (overflowFailure) yield* publish(overflowFailure)
+          if (failure instanceof LLMError && !publisher.hasProviderError()) {
+            yield* failUnsettled("Provider did not return a tool result", true)
+            yield* withPublication(
+              events.publish(SessionEvent.Step.Failed, {
+                sessionID: prepared.session.id,
+                timestamp: yield* DateTime.now,
+                assistantMessageID: yield* publisher.startAssistant(),
+                error: { type: "unknown", message: failure.reason.message },
+              }),
+            )
+          }
+        }),
+      hasProviderError: publisher.hasProviderError,
+      failUnsettled,
+    })
+    return SettleProviderTurn.Result.match<typeof AttemptResult.Type>(result, {
+      RecoveredOverflow: () => AttemptResult.cases.CompactedOverflow.make({}),
+      Complete: () =>
+        AttemptResult.cases.Complete.make({
           needsContinuation: !publisher.hasProviderError() && needsContinuation,
-        })
-      }),
-    )
+        }),
+    })
   }, Effect.scoped)
 
   const run = Effect.fn("SessionRunner.runTurn")(function* (input: Input): Effect.fn.Return<boolean, RunError> {
