@@ -12,7 +12,10 @@ import {
   preloadTreeDirectories,
   selectedTreePath,
   treeEntries,
-} from "./directory-tree"
+  treePathWithin,
+  currentPickerSuggestions,
+  displayPickerPath,
+} from "./directory-picker-domain"
 
 test("maps server directory entries into Pierre paths", () => {
   expect(
@@ -59,6 +62,7 @@ test("centralizes file and directory selection policy", () => {
   const directory = pickerMode("directory")
   expect(directory.includeFiles).toBeFalse()
   expect(directory.selection("/repo", "src/")).toBe("/repo/src")
+  expect(directory.selection("C:/Users/luke", "repos/")).toBe("C:\\Users\\luke\\repos")
   expect(directory.navigation("/tmp")).toBe("/tmp")
   expect(directory.result("/repo", "")).toBe("/repo")
   expect(directory.result("/repo", "", false)).toBeUndefined()
@@ -67,6 +71,28 @@ test("centralizes file and directory selection policy", () => {
 test("accepts mutations only from the active navigation", () => {
   expect(activeTreeNavigation(3, 3)).toBeTrue()
   expect(activeTreeNavigation(2, 3)).toBeFalse()
+})
+
+test("preserves POSIX case while matching Windows drives case-insensitively", () => {
+  expect(treePathWithin("/repo", "/Repo")).toBeFalse()
+  expect(treePathWithin("C:/Repo", "c:/repo/src")).toBeTrue()
+})
+
+test("displays paths using the selected server path format", () => {
+  expect(displayPickerPath("C:/Users/luke/repos", "C:/Users/luke/repos", "C:/Users/luke")).toBe(
+    "C:\\Users\\luke\\repos",
+  )
+  expect(displayPickerPath("C:/Users/luke/repos", "C:\\Users\\luke\\repos", "C:/Users/luke")).toBe(
+    "C:\\Users\\luke\\repos",
+  )
+  expect(displayPickerPath("/home/luke/repos", "repos", "/home/luke")).toBe("~/repos")
+  expect(displayPickerPath("/home/luke/repos", "~/repos", "/home/luke")).toBe("~/repos")
+})
+
+test("exposes autocomplete results only for their source query", () => {
+  const result = { query: "/repo/src", items: ["/repo/src/index.ts"] }
+  expect(currentPickerSuggestions(result, "/repo/src")).toEqual(result.items)
+  expect(currentPickerSuggestions(result, "/repo/test")).toEqual([])
 })
 
 test("scopes file autocomplete to the current browser root", () => {

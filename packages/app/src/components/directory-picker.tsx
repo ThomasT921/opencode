@@ -2,8 +2,13 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ServerConnection } from "@/context/server"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { lazy } from "solid-js"
 import { DialogSelectDirectory } from "./dialog-select-directory"
 import { directoryPickerKind } from "./directory-picker-policy"
+
+const DialogSelectDirectoryV2 = lazy(() =>
+  import("./dialog-select-directory-v2").then((module) => ({ default: module.DialogSelectDirectoryV2 })),
+)
 
 type DirectoryPickerInput = {
   server: ServerConnection.Any
@@ -32,9 +37,7 @@ export function useDirectoryPicker() {
       if (!selected) input.onSelect(null)
     }
     if (platform.platform === "desktop" && settings.general.newLayoutDesigns()) {
-      void import("./dialog-select-directory-v2").then(({ DialogSelectDirectoryV2 }) => {
-        dialog.show(() => <DialogSelectDirectoryV2 {...input} onSelect={onSelect} />, cancel)
-      })
+      dialog.show(() => <DialogSelectDirectoryV2 {...input} onSelect={onSelect} />, cancel)
       return
     }
     dialog.show(() => <DialogSelectDirectory {...input} onSelect={onSelect} />, cancel)
