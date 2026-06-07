@@ -10,6 +10,7 @@ import { useLanguage } from "@/context/language"
 import { ServerConnection } from "@/context/server"
 import {
   absoluteTreePath,
+  activeTreeNavigation,
   advanceTreePreload,
   nextSuggestionIndex,
   nextTreeScrollTop,
@@ -42,6 +43,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   const [activeSuggestion, setActiveSuggestion] = createSignal(-1)
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal(false)
+  const [rootValid, setRootValid] = createSignal(false)
   const listings = new Map<string, Promise<Array<{ name: string; type: "file" | "directory" }> | undefined>>()
   const advanced = new Set<string>()
   let tree: FileTree | undefined
@@ -77,7 +79,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     return Array.from(new Map(results.map((result) => [result.absolute, result])).values()).slice(0, 8)
   })
 
-  async function load(path: string, preload = true) {
+  async function load(path: string, generation: number, preload = true) {
     const key = path.replace(/\/+$/, "")
     setError(false)
     const absolute = absoluteTreePath(root(), key)
@@ -89,17 +91,19 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         .catch(() => undefined)
     listings.set(key, request)
     const nodes = await request
+    if (!activeTreeNavigation(generation, navigation)) return false
     if (!nodes) {
       listings.delete(key)
-      setError(true)
-      return
+      if (!key) setError(true)
+      return false
     }
     tree?.batch(
       policy.entries(key, nodes).map((item) => ({ type: "add", path: item })),
     )
     if (preload && advanceTreePreload(advanced, key)) {
-      void Promise.all(preloadTreeDirectories(key, nodes).map((directory) => load(directory, false)))
+      void Promise.all(preloadTreeDirectories(key, nodes).map((directory) => load(directory, generation, false)))
     }
+    return true
   }
 
   async function navigate(path: string) {
@@ -107,6 +111,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     if (!value) return
     const token = ++navigation
     setLoading(true)
+    setRootValid(false)
     setSelected("")
     setSuggestionsOpen(false)
     setActiveSuggestion(-1)
@@ -115,8 +120,10 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
     listings.clear()
     advanced.clear()
     tree?.resetPaths([])
-    await load("")
-    if (token === navigation) setLoading(false)
+    const valid = await load("", token)
+    if (!activeTreeNavigation(token, navigation)) return
+    setRootValid(valid)
+    setLoading(false)
   }
 
   function complete() {
@@ -177,7 +184,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   }
 
   function resolve() {
-    const path = policy.result(root(), selected())
+    const path = policy.result(root(), selected(), rootValid())
     if (!path) return
     props.onSelect(props.multiple ? [path] : path)
     dialog.close()
@@ -214,7 +221,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
         }
       `,
       onExpansionChange(change) {
-        if (change.expanded) void load(change.path)
+        if (change.expanded) void load(change.path, navigation)
       },
       onSelectionChange(paths) {
         const path = paths.at(-1)
@@ -300,11 +307,11 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
           <Show when={loading()}><div class="directory-picker-v2-state">{language.t("common.loading")}</div></Show>
           <Show when={!loading() && error()}><div class="directory-picker-v2-state">Unable to read this folder</div></Show>
         </div>
-        <div class="directory-picker-v2-selection">{policy.result(root(), selected())}</div>
+        <div class="directory-picker-v2-selection">{policy.result(root(), selected(), rootValid())}</div>
       </div>
       <DialogFooter>
         <ButtonV2 variant="neutral" onClick={() => dialog.close()}>{language.t("common.cancel")}</ButtonV2>
-        <ButtonV2 variant="contrast" disabled={!policy.result(root(), selected())} onClick={resolve}>
+        <ButtonV2 variant="contrast" disabled={!policy.result(root(), selected(), rootValid())} onClick={resolve}>
           {policy.action}
         </ButtonV2>
       </DialogFooter>

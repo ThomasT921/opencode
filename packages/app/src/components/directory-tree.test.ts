@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import {
   absoluteTreePath,
+  activeTreeNavigation,
   advanceTreePreload,
   nextSuggestionIndex,
   nextTreeScrollTop,
@@ -51,11 +52,18 @@ test("centralizes file and directory selection policy", () => {
   expect(file.selection("/repo/src", "index.ts")).toBe("src/index.ts")
   expect(file.selection("/repo", "src/")).toBeUndefined()
   expect(file.result("/repo", "src/index.ts")).toBe("src/index.ts")
+  expect(file.selection("/tmp", "example.txt")).toBe("/tmp/example.txt")
 
   const directory = pickerMode("directory")
   expect(directory.includeFiles).toBeFalse()
   expect(directory.selection("/repo", "src/")).toBe("/repo/src")
   expect(directory.result("/repo", "")).toBe("/repo")
+  expect(directory.result("/repo", "", false)).toBeUndefined()
+})
+
+test("accepts mutations only from the active navigation", () => {
+  expect(activeTreeNavigation(3, 3)).toBeTrue()
+  expect(activeTreeNavigation(2, 3)).toBeFalse()
 })
 
 test("scopes file autocomplete to the current browser root", () => {

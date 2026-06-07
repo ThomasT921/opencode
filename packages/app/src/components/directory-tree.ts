@@ -46,7 +46,8 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
         nodes.filter((node) => node.type === "directory"),
       )
     },
-    result(root: string, selected: string) {
+    result(root: string, selected: string, valid = true) {
+      if (!valid) return
       return selected || root || undefined
     },
     selection(root: string, path: string) {
@@ -79,6 +80,10 @@ export function advanceTreePreload(advanced: Set<string>, path: string) {
   return true
 }
 
+export function activeTreeNavigation(request: number, current: number) {
+  return request === current
+}
+
 export function nextTreeScrollTop(current: number, delta: number, scrollHeight: number, clientHeight: number) {
   return Math.min(Math.max(0, scrollHeight - clientHeight), Math.max(0, current + delta))
 }
@@ -105,7 +110,7 @@ export function selectedTreePath(root: string, path: string, mode: "directory" |
     const prefix = absoluteTreePath(base, "")
     if (absolute === prefix) return ""
     if (absolute.startsWith(prefix + "/")) return absolute.slice(prefix.length + 1)
-    return path
+    return absolute
   }
   return directory ? absoluteTreePath(root, path) : undefined
 }
