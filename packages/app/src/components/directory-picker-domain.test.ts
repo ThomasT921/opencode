@@ -15,6 +15,8 @@ import {
   treePathWithin,
   currentPickerSuggestions,
   displayPickerPath,
+  pickerParent,
+  pickerRoot,
 } from "./directory-picker-domain"
 
 test("maps server directory entries into Pierre paths", () => {
@@ -94,6 +96,13 @@ test("displays paths using the selected server path format", () => {
   )
   expect(displayPickerPath("/home/luke/repos", "repos", "/home/luke")).toBe("~/repos")
   expect(displayPickerPath("/home/luke/repos", "~/repos", "/home/luke")).toBe("~/repos")
+})
+
+test("treats the server share prefix as the UNC root", () => {
+  expect(pickerRoot("//Server/Share/repo/src")).toBe("//Server/Share")
+  expect(pickerRoot("\\\\Server\\Share\\repo\\src")).toBe("//Server/Share")
+  expect(pickerParent("//Server/Share")).toBe("//Server/Share")
+  expect(pickerParent("//Server/Share/repo")).toBe("//Server/Share")
 })
 
 test("exposes autocomplete results only for their source query", () => {

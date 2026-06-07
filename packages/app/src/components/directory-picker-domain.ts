@@ -207,7 +207,11 @@ export function joinPickerPath(base: string | undefined, relative: string) {
 
 export function pickerRoot(input: string) {
   const value = normalizePickerDrive(input)
-  if (value.startsWith("//")) return "//"
+  if (value.startsWith("//")) {
+    const [server, share] = value.slice(2).split("/")
+    if (server && share) return `//${server}/${share}`
+    return "//"
+  }
   if (value.startsWith("/")) return "/"
   if (/^[A-Za-z]:\//.test(value)) return value.slice(0, 3)
   return ""
@@ -215,8 +219,11 @@ export function pickerRoot(input: string) {
 
 export function pickerParent(input: string) {
   const value = trimPickerPath(input)
+  const root = pickerRoot(value)
+  if (value === root) return value
   if (value === "/" || value === "//" || /^[A-Za-z]:\/$/.test(value)) return value
   const index = value.lastIndexOf("/")
+  if (index < root.length) return root
   if (index <= 0) return "/"
   if (index === 2 && /^[A-Za-z]:/.test(value)) return value.slice(0, 3)
   return value.slice(0, index)
