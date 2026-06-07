@@ -121,7 +121,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   }
 
   async function navigate(path: string) {
-    const value = policy.navigation(pickerAbsoluteInput(cleanPickerInput(path), home()))
+    const value = policy.navigation(pickerAbsoluteInput(cleanPickerInput(path), home(), root() || start() || home()))
     if (!value) return
     const token = ++navigation
     setLoading(true)

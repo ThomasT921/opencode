@@ -17,6 +17,7 @@ import {
   displayPickerPath,
   pickerParent,
   pickerRoot,
+  pickerAbsoluteInput,
 } from "./directory-picker-domain"
 
 test("maps server directory entries into Pierre paths", () => {
@@ -106,6 +107,13 @@ test("treats the server share prefix as the UNC root", () => {
   expect(pickerRoot("\\\\Server\\Share\\repo\\src")).toBe("//Server/Share")
   expect(pickerParent("//Server/Share")).toBe("//Server/Share")
   expect(pickerParent("//Server/Share/repo")).toBe("//Server/Share")
+})
+
+test("resolves relative input against the current picker root", () => {
+  expect(pickerAbsoluteInput("src", "/home/luke", "/home/luke/repo")).toBe("/home/luke/repo/src")
+  expect(pickerAbsoluteInput("../other", "/home/luke", "/home/luke/repo")).toBe("/home/luke/other")
+  expect(pickerAbsoluteInput("~/.config", "/home/luke", "/home/luke/repo")).toBe("/home/luke/.config")
+  expect(pickerAbsoluteInput("src", "C:/Users/luke", "C:/Users/luke/repo")).toBe("C:/Users/luke/repo/src")
 })
 
 test("exposes autocomplete results only for their source query", () => {

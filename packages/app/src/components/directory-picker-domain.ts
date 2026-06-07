@@ -71,8 +71,10 @@ export function pickerFileSearchQuery(root: string, input: string, home: string)
   return value
 }
 
-export function pickerAbsoluteInput(input: string, home: string) {
-  return input.replace(/\\/g, "/").replace(/^~(?=\/|$)/, home).replace(/\/+$/, "") || "/"
+export function pickerAbsoluteInput(input: string, home: string, current: string) {
+  const value = normalizePickerDrive(input).replace(/^~(?=\/|$)/, normalizePickerDrive(home))
+  const absolute = pickerRoot(value) ? value : joinPickerPath(current, value)
+  return canonicalPickerPath(absolute)
 }
 
 export function treePathWithin(base: string | undefined, path: string) {
