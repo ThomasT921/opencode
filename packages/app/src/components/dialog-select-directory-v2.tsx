@@ -15,6 +15,7 @@ import {
   nextSuggestionIndex,
   nextTreeScrollTop,
   pickerFileSearchQuery,
+  pickerAbsoluteInput,
   pickerMode,
   preloadTreeDirectories,
 } from "./directory-tree"
@@ -107,7 +108,7 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   }
 
   async function navigate(path: string) {
-    const value = cleanInput(path)
+    const value = policy.navigation(pickerAbsoluteInput(cleanInput(path), home()))
     if (!value) return
     const token = ++navigation
     setLoading(true)

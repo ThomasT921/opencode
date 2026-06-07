@@ -29,10 +29,14 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
       entries(parent: string, nodes: ReadonlyArray<{ name: string; type: "file" | "directory" }>) {
         return treeEntries(parent, nodes)
       },
+      navigation(path: string) {
+        return treePathWithin(base, path) ? path : undefined
+      },
       result(root: string, selected: string) {
         return selected || undefined
       },
       selection(root: string, path: string) {
+        if (!treePathWithin(base, root)) return
         return selectedTreePath(root, path, "file", base)
       },
     }
@@ -45,6 +49,9 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
         parent,
         nodes.filter((node) => node.type === "directory"),
       )
+    },
+    navigation(path: string) {
+      return path
     },
     result(root: string, selected: string, valid = true) {
       if (!valid) return
@@ -62,6 +69,17 @@ export function pickerFileSearchQuery(root: string, input: string, home: string)
   if (value === base) return ""
   if (value.startsWith(base + "/")) return value.slice(base.length + 1)
   return value
+}
+
+export function pickerAbsoluteInput(input: string, home: string) {
+  return input.replace(/\\/g, "/").replace(/^~(?=\/|$)/, home).replace(/\/+$/, "") || "/"
+}
+
+export function treePathWithin(base: string | undefined, path: string) {
+  if (!base) return false
+  const root = absoluteTreePath(base, "").toLowerCase()
+  const target = absoluteTreePath(path, "").toLowerCase()
+  return target === root || target.startsWith(root + "/")
 }
 
 export function preloadTreeDirectories(
