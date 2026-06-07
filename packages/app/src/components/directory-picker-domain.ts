@@ -99,7 +99,7 @@ export function pickerRelativePath(base: string | undefined, path: string) {
   if (!base) return
   const rootPath = canonicalPickerPath(base)
   const targetPath = canonicalPickerPath(path)
-  const insensitive = /^[A-Za-z]:\//.test(rootPath)
+  const insensitive = /^[A-Za-z]:\//.test(rootPath) || rootPath.startsWith("//")
   const root = insensitive ? rootPath.toLowerCase() : rootPath
   const target = insensitive ? targetPath.toLowerCase() : targetPath
   if (target === root) return ""
