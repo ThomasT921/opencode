@@ -25,7 +25,7 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
   if (mode === "file") {
     return {
       includeFiles: true,
-      action: "Select file",
+      action: "file" as const,
       entries(parent: string, nodes: ReadonlyArray<{ name: string; type: "file" | "directory" }>) {
         return treeEntries(parent, nodes)
       },
@@ -43,7 +43,7 @@ export function pickerMode(mode: "directory" | "file", base?: string) {
   }
   return {
     includeFiles: false,
-    action: "Select folder",
+    action: "directory" as const,
     entries(parent: string, nodes: ReadonlyArray<{ name: string; type: "file" | "directory" }>) {
       return treeEntries(
         parent,

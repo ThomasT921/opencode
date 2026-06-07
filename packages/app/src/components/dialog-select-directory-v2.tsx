@@ -42,6 +42,10 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
   const dialog = useDialog()
   const language = useLanguage()
   const policy = pickerMode(props.mode ?? "directory", props.start)
+  const action = {
+    file: language.t("dialog.directory.action.selectFile"),
+    directory: language.t("dialog.directory.action.selectFolder"),
+  }
   const [root, setRoot] = createSignal("")
   const [input, setInput] = createSignal("")
   const [selected, setSelected] = createSignal("")
@@ -276,8 +280,12 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
           />
           <div class="directory-picker-v2-actions">
             <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(home())}>~</ButtonV2>
-            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerRoot(root()) || root())}>Root</ButtonV2>
-            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerParent(root()))}>Parent</ButtonV2>
+            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerRoot(root()) || root())}>
+              {language.t("dialog.directory.root")}
+            </ButtonV2>
+            <ButtonV2 size="small" variant="ghost" onClick={() => void navigate(pickerParent(root()))}>
+              {language.t("dialog.directory.parent")}
+            </ButtonV2>
           </div>
           <Show when={suggestionsOpen() && currentSuggestions().length > 0}>
             <div id="directory-picker-v2-suggestions" role="listbox" class="directory-picker-v2-suggestions">
@@ -315,14 +323,16 @@ export function DialogSelectDirectoryV2(props: DialogSelectDirectoryV2Props) {
           }}
         >
           <Show when={loading()}><div class="directory-picker-v2-state">{language.t("common.loading")}</div></Show>
-          <Show when={!loading() && error()}><div class="directory-picker-v2-state">Unable to read this folder</div></Show>
+          <Show when={!loading() && error()}>
+            <div class="directory-picker-v2-state">{language.t("dialog.directory.readError")}</div>
+          </Show>
         </div>
         <div class="directory-picker-v2-selection">{policy.result(root(), selected(), rootValid())}</div>
       </div>
       <DialogFooter>
         <ButtonV2 variant="neutral" onClick={() => dialog.close()}>{language.t("common.cancel")}</ButtonV2>
         <ButtonV2 variant="contrast" disabled={!policy.result(root(), selected(), rootValid())} onClick={resolve}>
-          {policy.action}
+          {action[policy.action]}
         </ButtonV2>
       </DialogFooter>
     </Dialog>
