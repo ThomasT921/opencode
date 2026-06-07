@@ -76,13 +76,36 @@ export function pickerAbsoluteInput(input: string, home: string) {
 }
 
 export function treePathWithin(base: string | undefined, path: string) {
-  if (!base) return false
-  const rootPath = absoluteTreePath(base, "")
-  const targetPath = absoluteTreePath(path, "")
+  return pickerRelativePath(base, path) !== undefined
+}
+
+export function canonicalPickerPath(path: string) {
+  const value = normalizePickerDrive(path)
+  const root = pickerRoot(value)
+  const parts = value.slice(root.length).split("/")
+  const resolved = parts.reduce<string[]>((output, part) => {
+    if (!part || part === ".") return output
+    if (part === "..") {
+      output.pop()
+      return output
+    }
+    output.push(part)
+    return output
+  }, [])
+  return joinPickerPath(root, resolved.join("/"))
+}
+
+export function pickerRelativePath(base: string | undefined, path: string) {
+  if (!base) return
+  const rootPath = canonicalPickerPath(base)
+  const targetPath = canonicalPickerPath(path)
   const insensitive = /^[A-Za-z]:\//.test(rootPath)
   const root = insensitive ? rootPath.toLowerCase() : rootPath
   const target = insensitive ? targetPath.toLowerCase() : targetPath
-  return target === root || target.startsWith(root + "/")
+  if (target === root) return ""
+  const prefix = root === "/" ? root : root + "/"
+  if (!target.startsWith(prefix)) return
+  return targetPath.slice(prefix.length)
 }
 
 export function currentPickerSuggestions<T>(
@@ -136,10 +159,7 @@ export function selectedTreePath(root: string, path: string, mode: "directory" |
     if (directory) return
     if (!base) return path
     const absolute = absoluteTreePath(root, path)
-    const prefix = absoluteTreePath(base, "")
-    if (absolute === prefix) return ""
-    if (absolute.startsWith(prefix + "/")) return absolute.slice(prefix.length + 1)
-    return absolute
+    return pickerRelativePath(base, absolute)
   }
   return directory ? nativePickerPath(absoluteTreePath(root, path)) : undefined
 }
