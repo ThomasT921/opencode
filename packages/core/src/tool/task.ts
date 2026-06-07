@@ -9,7 +9,7 @@ import { SessionMessage } from "../session/message"
 import { Prompt } from "../session/prompt"
 import { Tool } from "./tool"
 
-export const Parameters = Schema.Struct({
+export const Input = Schema.Struct({
   description: Schema.String.annotate({ description: "A short description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
   subagent_type: Schema.String.annotate({ description: "The specialized agent to use" }),
@@ -18,7 +18,7 @@ export const Parameters = Schema.Struct({
   }),
 })
 
-export const Success = Schema.Struct({
+export const Output = Schema.Struct({
   sessionID: SessionV2.ID,
   status: Schema.Literals(["running", "completed"]),
   output: Schema.String.pipe(Schema.optional),
@@ -35,8 +35,8 @@ export const make = Effect.fn("TaskTool.make")(function* (
   return Tool.make({
     description:
       "Delegate focused work to a specialized child agent. Foreground calls wait for the result; background calls return immediately and notify this Session when complete.",
-    input: Parameters,
-    output: Success,
+    input: Input,
+    output: Output,
     execute: (parameters, context) =>
       Effect.gen(function* () {
         const parent = yield* sessions.get(context.sessionID)
