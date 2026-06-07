@@ -24,7 +24,7 @@ type Row = {
   group: "recent" | "folders"
 }
 
-function cleanInput(value: string) {
+export function cleanInput(value: string) {
   const first = (value ?? "").split(/\r?\n/)[0] ?? ""
   return first.replace(/[\u0000-\u001F\u007F]/g, "").trim()
 }
@@ -58,7 +58,7 @@ function joinPath(base: string | undefined, rel: string) {
   return b + "/" + r
 }
 
-function rootOf(input: string) {
+export function rootOf(input: string) {
   const v = normalizeDriveRoot(input)
   if (v.startsWith("//")) return "//"
   if (v.startsWith("/")) return "/"
@@ -66,7 +66,7 @@ function rootOf(input: string) {
   return ""
 }
 
-function parentOf(input: string) {
+export function parentOf(input: string) {
   const v = trimTrailing(input)
   if (v === "/") return v
   if (v === "//") return v
@@ -98,7 +98,7 @@ function tildeOf(absolute: string, home: string) {
   return ""
 }
 
-function displayPath(path: string, input: string, home: string) {
+export function displayPath(path: string, input: string, home: string) {
   const full = trimTrailing(path)
   if (modeOf(input) === "absolute") return full
   return tildeOf(full, home) || full
@@ -128,7 +128,7 @@ function uniqueRows(rows: Row[]) {
   })
 }
 
-function useDirectorySearch(args: { sdk: ServerSDK; start: () => string | undefined; home: () => string }) {
+export function useDirectorySearch(args: { sdk: ServerSDK; start: () => string | undefined; home: () => string }) {
   const cache = new Map<string, Promise<Array<{ name: string; absolute: string }>>>()
   let current = 0
 
