@@ -217,11 +217,13 @@ function fetchFromClient<T extends { name: string }>(
   )
 }
 
-interface CreateResult {
-  mcpClient?: MCPClient
-  status: Status
-  defs?: MCPToolDef[]
-}
+type ConnectedStatus = Extract<Status, { status: "connected" }>
+type DisconnectedStatus = Exclude<Status, ConnectedStatus>
+type ConnectionFailedStatus = Exclude<DisconnectedStatus, { status: "disabled" }>
+type ConnectResult = { client: MCPClient; status: ConnectedStatus } | { status: ConnectionFailedStatus }
+type CreateResult =
+  | { mcpClient: MCPClient; status: ConnectedStatus; defs: MCPToolDef[] }
+  | { status: DisconnectedStatus }
 
 interface AuthResult {
   authorizationUrl: string
@@ -302,15 +304,14 @@ export const layer = Layer.effect(
 
     const connectRemote = Effect.fn("MCP.connectRemote")(function* (
       key: string,
-      mcp: ConfigMCPV1.Info & { type: "remote" },
-    ) {
+      mcp: ConfigMCPV1.Remote,
+    ): Effect.fn.Return<ConnectResult> {
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
       const url = remoteURL(mcp.url)
       if (!url) {
         return {
-          client: undefined as MCPClient | undefined,
-          status: { status: "failed" as const, error: `Invalid MCP URL for "${key}"` },
+          status: { status: "failed", error: `Invalid MCP URL for "${key}"` },
         }
       }
       let authProvider: McpOAuthProvider | undefined
@@ -351,7 +352,7 @@ export const layer = Layer.effect(
       ]
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
-      let lastStatus: Status | undefined
+      let lastStatus: ConnectionFailedStatus | undefined
 
       for (const { name, transport } of transports) {
         const result = yield* connectTransport(transport, connectTimeout).pipe(
@@ -393,21 +394,19 @@ export const layer = Layer.effect(
             return Effect.void
           }),
         )
-        if (result) return { client: result.client, status: { status: "connected" } as Status }
+        if (result) return { client: result.client, status: { status: "connected" } }
         // If this was an auth error, stop trying other transports
         if (lastStatus?.status === "needs_auth" || lastStatus?.status === "needs_client_registration") break
       }
 
       return {
-        client: undefined as MCPClient | undefined,
-        status: (lastStatus ?? { status: "failed", error: "Unknown error" }) as Status,
+        status: lastStatus ?? { status: "failed", error: "Unknown error" },
       }
     })
 
     const connectLocal = Effect.fn("MCP.connectLocal")(function* (
-      key: string,
-      mcp: ConfigMCPV1.Info & { type: "local" },
-    ) {
+      mcp: ConfigMCPV1.Local,
+    ): Effect.fn.Return<ConnectResult> {
       const [cmd, ...args] = mcp.command
       const cwd = yield* InstanceState.directory
       const transport = new StdioClientTransport({
@@ -424,13 +423,10 @@ export const layer = Layer.effect(
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
       return yield* connectTransport(transport, connectTimeout).pipe(
-        Effect.map((client): { client: MCPClient | undefined; status: Status } => ({
-          client,
-          status: { status: "connected" },
-        })),
-        Effect.catch((error): Effect.Effect<{ client: MCPClient | undefined; status: Status }> => {
+        Effect.map((client) => ({ client, status: { status: "connected" } }) satisfies ConnectResult),
+        Effect.catch((error) => {
           const msg = error instanceof Error ? error.message : String(error)
-          return Effect.succeed({ client: undefined, status: { status: "failed", error: msg } })
+          return Effect.succeed({ status: { status: "failed", error: msg } } satisfies ConnectResult)
         }),
       )
     })
@@ -440,25 +436,20 @@ export const layer = Layer.effect(
         return DISABLED_RESULT
       }
 
-      const { client: mcpClient, status } =
-        mcp.type === "remote"
-          ? yield* connectRemote(key, mcp as ConfigMCPV1.Info & { type: "remote" })
-          : yield* connectLocal(key, mcp as ConfigMCPV1.Info & { type: "local" })
+      const result = mcp.type === "remote" ? yield* connectRemote(key, mcp) : yield* connectLocal(mcp)
 
-      if (!mcpClient) {
-        if (status.status !== "connected" && status.status !== "disabled") {
-          yield* Effect.logWarning("server unavailable", { key, type: mcp.type, status: status.status })
-        }
-        return { status } satisfies CreateResult
+      if (!("client" in result)) {
+        yield* Effect.logWarning("server unavailable", { key, type: mcp.type, status: result.status.status })
+        return result
       }
 
-      const listed = mcpClient.getServerCapabilities()?.tools ? yield* defs(mcpClient, mcp.timeout) : []
+      const listed = result.client.getServerCapabilities()?.tools ? yield* defs(result.client, mcp.timeout) : []
       if (!listed) {
-        yield* Effect.tryPromise(() => mcpClient.close()).pipe(Effect.ignore)
+        yield* Effect.tryPromise(() => result.client.close()).pipe(Effect.ignore)
         return { status: { status: "failed", error: "Failed to get tools" } } satisfies CreateResult
       }
 
-      return { mcpClient, status, defs: listed } satisfies CreateResult
+      return { mcpClient: result.client, status: result.status, defs: listed } satisfies CreateResult
     })
     const cfgSvc = yield* Config.Service
 
@@ -529,9 +520,9 @@ export const layer = Layer.effect(
               if (!result) return
 
               s.status[key] = result.status
-              if (result.mcpClient) {
+              if ("mcpClient" in result) {
                 s.clients[key] = result.mcpClient
-                s.defs[key] = result.defs!
+                s.defs[key] = result.defs
                 watch(s, key, result.mcpClient, bridge, mcp.timeout)
               }
             }),
@@ -617,13 +608,13 @@ export const layer = Layer.effect(
       const result = yield* create(name, mcp)
 
       s.status[name] = result.status
-      if (!result.mcpClient) {
+      if (!("mcpClient" in result)) {
         yield* closeClient(s, name)
         delete s.clients[name]
         return result.status
       }
 
-      return yield* storeClient(s, name, result.mcpClient, result.defs!, mcp.timeout)
+      return yield* storeClient(s, name, result.mcpClient, result.defs, mcp.timeout)
     })
 
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
