@@ -24,9 +24,7 @@ import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "./project"
 import { useEvent } from "./event"
 import { useSDK } from "./sdk"
-import { useTuiStartup } from "./runtime"
 import { createSimpleContext } from "./helper"
-import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
 import path from "path"
@@ -57,7 +55,6 @@ export const {
 } = createSimpleContext({
   name: "Sync",
   init: () => {
-    const startup = useTuiStartup()
     const kv = useKV()
     const [store, setStore] = createStore<{
       status: "loading" | "partial" | "complete"
@@ -422,11 +419,9 @@ export const {
       }
     })
 
-    const exit = useExit()
     const args = useArgs()
 
-    async function bootstrap(input: { fatal?: boolean } = {}) {
-      const fatal = input.fatal ?? true
+    async function bootstrap() {
       const workspace = project.workspace.current()
       const projectPromise = project.sync()
       const sessionListPromise = projectPromise.then(() => listSessions())
@@ -440,14 +435,26 @@ export const {
         .catch(() => emptyConsoleState)
       const agentsPromise = sdk.client.app.agents({ workspace }, { throwOnError: true })
       const configPromise = sdk.client.config.get({ workspace }, { throwOnError: true })
-      await Promise.all([
-        providersPromise,
-        providerListPromise,
-        agentsPromise,
-        configPromise,
-        projectPromise,
-        ...(args.continue ? [sessionListPromise] : []),
-      ])
+      const blockingRequests: { name: string; promise: Promise<unknown> }[] = [
+        { name: "config.providers", promise: providersPromise },
+        { name: "provider.list", promise: providerListPromise },
+        { name: "app.agents", promise: agentsPromise },
+        { name: "config.get", promise: configPromise },
+        { name: "project.sync", promise: projectPromise },
+        ...(args.continue ? [{ name: "session.list", promise: sessionListPromise }] : []),
+      ]
+
+      await Promise.allSettled(blockingRequests.map((r) => r.promise))
+        .then((settled) => {
+          // Surface every failed endpoint in one labeled message instead of
+          // letting the first rejection drown its siblings as unhandled
+          // rejections.
+          const failures = blockingRequests.flatMap((request, index) => {
+            const result = settled[index]
+            return result?.status === "rejected" ? [`${request.name}: ${String(result.reason)}`] : []
+          })
+          if (failures.length) throw new Error(failures.join("\n"))
+        })
         .then(async () => {
           const providersResponse = providersPromise.then((x) => x.data!)
           const providerListResponse = providerListPromise.then((x) => x.data!)
@@ -511,11 +518,7 @@ export const {
             name: e instanceof Error ? e.name : undefined,
             stack: e instanceof Error ? e.stack : undefined,
           })
-          if (fatal) {
-            exit(e)
-          } else {
-            throw e
-          }
+          setStore("status", "partial")
         })
     }
 
@@ -530,8 +533,7 @@ export const {
         return store.status
       },
       get ready() {
-        if (startup.skipInitialLoading) return true
-        return store.status !== "loading"
+        return true
       },
       get path() {
         return project.instance.path()

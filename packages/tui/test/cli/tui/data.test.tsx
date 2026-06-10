@@ -21,31 +21,46 @@ function global(payload: Event): GlobalEvent {
   return { directory, project: "proj_test", payload }
 }
 
-function emitTwice(events: ReturnType<typeof createEventSource>, payload: Event) {
-  const event = global(payload)
-  events.emit(event)
-  events.emit(event)
+function emitEvent(events: ReturnType<typeof createEventSource>, payload: Event) {
+  events.emit(global(payload))
 }
 
-test("sync v2 refreshes references after updates", async () => {
-  const events = createEventSource()
-  let requests = 0
+test("refreshes resources into reactive getters", async () => {
+  const location = {
+    directory,
+    project: { id: "proj_test", directory },
+  }
   const calls = createFetch((url) => {
-    if (url.pathname !== "/api/reference") return
-    requests++
-    return json({
-      location: { directory, project: { id: "proj_test", directory } },
-      data: requests === 1 ? [] : [{ name: "docs", path: "/docs", source: { type: "local", path: "/docs" } }],
-    })
+    if (url.pathname === "/api/session/ses_test")
+      return json({
+        data: {
+          id: "ses_test",
+          projectID: "proj_test",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 0, updated: 0 },
+          title: "Test session",
+          location: { directory },
+        },
+      })
+    if (url.pathname === "/api/agent")
+      return json({
+        location,
+        data: [
+          { id: "build", request: { headers: {}, body: {} }, mode: "primary", hidden: false, permissions: [] },
+        ],
+      })
+    return undefined
   })
-  let sync!: ReturnType<typeof useData>
+  const events = createEventSource()
+  let data!: ReturnType<typeof useData>
   let ready!: () => void
   const mounted = new Promise<void>((resolve) => {
     ready = resolve
   })
 
   function Probe() {
-    sync = useData()
+    data = useData()
     onMount(ready)
     return <box />
   }
@@ -64,10 +79,16 @@ test("sync v2 refreshes references after updates", async () => {
 
   try {
     await mounted
-    await wait(() => requests === 1)
-    events.emit(global({ id: "evt_reference_1", type: "reference.updated", properties: {} }))
-    await wait(() => sync.data.reference.length === 1)
-    expect(sync.data.reference[0]?.name).toBe("docs")
+    expect(data.location.default()).toEqual({ directory })
+    expect(data.session.get("ses_test")).toBeUndefined()
+    expect(data.location.agent.list(location)).toBeUndefined()
+
+    await data.session.refresh("ses_test")
+    await data.location.agent.refresh()
+
+    expect(data.session.get("ses_test")?.title).toBe("Test session")
+    expect(data.location.default()).toEqual({ directory, workspaceID: undefined })
+    expect(data.location.agent.list(location)?.map((agent) => agent.id)).toEqual(["build"])
   } finally {
     app.renderer.destroy()
   }
@@ -102,12 +123,12 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
 
   try {
     await mounted
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_agent_1",
       type: "session.next.agent.switched",
       properties: { sessionID: "session-1", messageID: "msg_agent_1", timestamp: 0, agent: "build" },
     })
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_model_1",
       type: "session.next.model.switched",
       properties: {
@@ -117,7 +138,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
         model: { id: "model-1", providerID: "provider-1" },
       },
     })
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_step_started_1",
       type: "session.next.step.started",
       properties: {
@@ -128,7 +149,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
         model: { id: "model-1", providerID: "provider-1" },
       },
     })
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_input_1",
       type: "session.next.tool.input.started",
       properties: {
@@ -139,7 +160,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
         name: "bash",
       },
     })
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_called_1",
       type: "session.next.tool.called",
       properties: {
@@ -152,7 +173,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
         provider: { executed: false, metadata: { fake: { call: true } } },
       },
     })
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_failed_1",
       type: "session.next.tool.failed",
       properties: {
@@ -166,7 +187,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
     })
 
     await wait(() => {
-      const assistant = sync.session.message.fromSession("session-1")[0]
+      const assistant = sync.session.message.list("session-1")?.[0]
       return (
         assistant?.type === "assistant" &&
         assistant.content[0]?.type === "tool" &&
@@ -174,7 +195,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
       )
     })
 
-    const assistant = sync.session.message.fromSession("session-1")[0]
+    const assistant = sync.session.message.list("session-1")?.[0]
     expect(assistant?.type).toBe("assistant")
     if (assistant?.type !== "assistant") return
     expect(assistant.id).toBe("msg_explicit_assistant_9")
@@ -192,7 +213,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
       metadata: { fake: { call: true } },
       resultMetadata: { fake: { result: true } },
     })
-    expect(sync.session.message.fromSession("session-1").map((message) => message.type)).toEqual([
+    expect((sync.session.message.list("session-1") ?? []).map((message) => message.type)).toEqual([
       "assistant",
       "model-switched",
       "agent-switched",
@@ -231,7 +252,7 @@ test("sync v2 renders admitted prompts only after promotion", async () => {
 
   try {
     await mounted
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_admitted_1",
       type: "session.next.prompt.admitted",
       properties: {
@@ -242,9 +263,9 @@ test("sync v2 renders admitted prompts only after promotion", async () => {
         delivery: "steer",
       },
     })
-    expect(sync.session.message.fromSession("session-1")).toEqual([])
+    expect(sync.session.message.list("session-1") ?? []).toEqual([])
 
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_promoted_1",
       type: "session.next.prompt.promoted",
       properties: {
@@ -256,8 +277,8 @@ test("sync v2 renders admitted prompts only after promotion", async () => {
       },
     })
 
-    await wait(() => sync.session.message.fromSession("session-1").length === 1)
-    const message = sync.session.message.fromSession("session-1")[0]
+    await wait(() => sync.session.message.list("session-1")?.length === 1)
+    const message = sync.session.message.list("session-1")?.[0]
     expect(message?.type).toBe("user")
     if (message?.type !== "user") return
     expect(message).toMatchObject({ id: "msg_user_1", text: "hello" })
@@ -295,7 +316,7 @@ test("sync v2 renders a promoted prompt when admission was missed", async () => 
 
   try {
     await mounted
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_promoted_1",
       type: "session.next.prompt.promoted",
       properties: {
@@ -307,8 +328,8 @@ test("sync v2 renders a promoted prompt when admission was missed", async () => 
       },
     })
 
-    await wait(() => sync.session.message.fromSession("session-1").length === 1)
-    expect(sync.session.message.fromSession("session-1")[0]?.id).toBe("msg_user_1")
+    await wait(() => sync.session.message.list("session-1")?.length === 1)
+    expect(sync.session.message.list("session-1")?.[0]?.id).toBe("msg_user_1")
   } finally {
     app.renderer.destroy()
   }
@@ -343,7 +364,7 @@ test("sync v2 projects live context updates with their message ID", async () => 
 
   try {
     await mounted
-    emitTwice(events, {
+    emitEvent(events, {
       id: "evt_context_1",
       type: "session.next.context.updated",
       properties: {
@@ -354,264 +375,11 @@ test("sync v2 projects live context updates with their message ID", async () => 
       },
     })
 
-    await wait(() => sync.session.message.fromSession("session-1").length === 1)
-    expect(sync.session.message.fromSession("session-1")[0]).toMatchObject({
+    await wait(() => sync.session.message.list("session-1")?.length === 1)
+    expect(sync.session.message.list("session-1")?.[0]).toMatchObject({
       id: "msg_context_1",
       type: "system",
       text: "Updated context",
-    })
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("sync v2 preserves live events while snapshot hydration is in flight", async () => {
-  const events = createEventSource()
-  const response = Promise.withResolvers<Response>()
-  const calls = createFetch((url) => {
-    if (url.pathname === "/api/session/session-1/message") return response.promise
-    return undefined
-  })
-  let sync!: ReturnType<typeof useData>
-  let ready!: () => void
-  const mounted = new Promise<void>((resolve) => {
-    ready = resolve
-  })
-
-  function Probe() {
-    sync = useData()
-    onMount(ready)
-    return <box />
-  }
-
-  const app = await testRender(() => (
-    <TestTuiContexts>
-      <SDKProvider url="http://test" directory={directory} events={events.source} fetch={calls.fetch}>
-        <ProjectProvider>
-          <DataProvider>
-            <Probe />
-          </DataProvider>
-        </ProjectProvider>
-      </SDKProvider>
-    </TestTuiContexts>
-  ))
-
-  try {
-    await mounted
-    const hydration = sync.session.message.sync("session-1")
-    emitTwice(events, {
-      id: "evt_agent_1",
-      type: "session.next.agent.switched",
-      properties: { sessionID: "session-1", messageID: "msg_agent_1", timestamp: 0, agent: "build" },
-    })
-    response.resolve(json({ data: [] }))
-    await hydration
-
-    expect(sync.session.message.fromSession("session-1").map((message) => [message.id, message.type])).toEqual([
-      ["msg_agent_1", "agent-switched"],
-    ])
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("sync v2 replaces stale cached rows while preserving in-flight live rows", async () => {
-  const events = createEventSource()
-  const response = Promise.withResolvers<Response>()
-  const calls = createFetch((url) => {
-    if (url.pathname === "/api/session/session-1/message") return response.promise
-    return undefined
-  })
-  let sync!: ReturnType<typeof useData>
-  let ready!: () => void
-  const mounted = new Promise<void>((resolve) => {
-    ready = resolve
-  })
-
-  function Probe() {
-    sync = useData()
-    onMount(ready)
-    return <box />
-  }
-
-  const app = await testRender(() => (
-    <TestTuiContexts>
-      <SDKProvider url="http://test" directory={directory} events={events.source} fetch={calls.fetch}>
-        <ProjectProvider>
-          <DataProvider>
-            <Probe />
-          </DataProvider>
-        </ProjectProvider>
-      </SDKProvider>
-    </TestTuiContexts>
-  ))
-
-  try {
-    await mounted
-    emitTwice(events, {
-      id: "evt_promoted_1",
-      type: "session.next.prompt.promoted",
-      properties: {
-        sessionID: "session-1",
-        messageID: "msg_user_1",
-        timestamp: 1,
-        prompt: { text: "stale" },
-        timeCreated: 0,
-      },
-    })
-    await wait(() => sync.session.message.fromSession("session-1")[0]?.id === "msg_user_1")
-    const hydration = sync.session.message.sync("session-1")
-    emitTwice(events, {
-      id: "evt_agent_1",
-      type: "session.next.agent.switched",
-      properties: { sessionID: "session-1", messageID: "msg_agent_1", timestamp: 2, agent: "build" },
-    })
-    await wait(() => sync.session.message.fromSession("session-1")[0]?.id === "msg_agent_1")
-    response.resolve(
-      json({
-        data: [{ id: "msg_user_1", type: "user", text: "fresh", time: { created: 0 } }],
-      }),
-    )
-    await hydration
-
-    expect(sync.session.message.fromSession("session-1").map((message) => [message.id, message.type])).toEqual([
-      ["msg_agent_1", "agent-switched"],
-      ["msg_user_1", "user"],
-    ])
-    expect(sync.session.message.fromSession("session-1")[1]).toMatchObject({ text: "fresh" })
-  } finally {
-    app.renderer.destroy()
-  }
-})
-
-test("sync v2 preserves snapshot order and metadata for in-flight updates", async () => {
-  const events = createEventSource()
-  const response = Promise.withResolvers<Response>()
-  const calls = createFetch((url) => {
-    if (url.pathname === "/api/session/session-1/message") return response.promise
-    return undefined
-  })
-  let sync!: ReturnType<typeof useData>
-  let ready!: () => void
-  const mounted = new Promise<void>((resolve) => {
-    ready = resolve
-  })
-
-  function Probe() {
-    sync = useData()
-    onMount(ready)
-    return <box />
-  }
-
-  const app = await testRender(() => (
-    <TestTuiContexts>
-      <SDKProvider url="http://test" directory={directory} events={events.source} fetch={calls.fetch}>
-        <ProjectProvider>
-          <DataProvider>
-            <Probe />
-          </DataProvider>
-        </ProjectProvider>
-      </SDKProvider>
-    </TestTuiContexts>
-  ))
-
-  try {
-    await mounted
-    emitTwice(events, {
-      id: "evt_step_older",
-      type: "session.next.step.started",
-      properties: {
-        sessionID: "session-1",
-        assistantMessageID: "msg_assistant_older",
-        timestamp: 0,
-        agent: "build",
-        model: { id: "model", providerID: "provider" },
-      },
-    })
-    emitTwice(events, {
-      id: "evt_step_1",
-      type: "session.next.step.started",
-      properties: {
-        sessionID: "session-1",
-        assistantMessageID: "msg_assistant_old",
-        timestamp: 1,
-        agent: "build",
-        model: { id: "model", providerID: "provider" },
-      },
-    })
-    await wait(() => sync.session.message.fromSession("session-1")[0]?.id === "msg_assistant_old")
-    const hydration = sync.session.message.sync("session-1")
-    emitTwice(events, {
-      id: "evt_text_1",
-      type: "session.next.text.started",
-      properties: {
-        sessionID: "session-1",
-        assistantMessageID: "msg_assistant_old",
-        timestamp: 2,
-        textID: "text-1",
-      },
-    })
-    emitTwice(events, {
-      id: "evt_text_older",
-      type: "session.next.text.started",
-      properties: {
-        sessionID: "session-1",
-        assistantMessageID: "msg_assistant_older",
-        timestamp: 2,
-        textID: "text-older",
-      },
-    })
-    await wait(() => {
-      const messages = sync.session.message.fromSession("session-1")
-      return messages.every((message) => message.type !== "assistant" || message.content[0]?.type === "text")
-    })
-    response.resolve(
-      json({
-        data: [
-          {
-            id: "msg_assistant_new",
-            type: "assistant",
-            agent: "build",
-            model: { id: "model", providerID: "provider" },
-            content: [],
-            time: { created: 3 },
-          },
-          {
-            id: "msg_assistant_old",
-            type: "assistant",
-            metadata: { source: "snapshot" },
-            agent: "build",
-            model: { id: "model", providerID: "provider" },
-            content: [],
-            time: { created: 1 },
-          },
-        ],
-      }),
-    )
-    await hydration
-    emitTwice(events, {
-      id: "evt_step_late_duplicate",
-      type: "session.next.step.started",
-      properties: {
-        sessionID: "session-1",
-        assistantMessageID: "msg_assistant_old",
-        timestamp: 1,
-        agent: "build",
-        model: { id: "model", providerID: "provider" },
-      },
-    })
-
-    expect(sync.session.message.fromSession("session-1").map((message) => message.id)).toEqual([
-      "msg_assistant_new",
-      "msg_assistant_old",
-      "msg_assistant_older",
-    ])
-    expect(JSON.parse(JSON.stringify(sync.session.message.fromSession("session-1")[1]))).toMatchObject({
-      metadata: { source: "snapshot" },
-      content: [{ type: "text", id: "text-1", text: "" }],
-    })
-    expect(JSON.parse(JSON.stringify(sync.session.message.fromSession("session-1")[2]))).toMatchObject({
-      content: [{ type: "text", id: "text-older", text: "" }],
     })
   } finally {
     app.renderer.destroy()
