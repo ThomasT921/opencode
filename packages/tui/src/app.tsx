@@ -579,15 +579,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "workspace.copy_path",
-        title: "Copy worktree path",
-        category: "Workspace",
+        title: "Copy session location",
+        category: "Session",
         enabled: () => currentWorktreeWorkspace() !== undefined,
         run: async () => {
           const workspace = currentWorktreeWorkspace()
           if (!workspace?.directory) return
           await clipboard
             .write?.(workspace.directory)
-            .then(() => toast.show({ message: "Copied worktree path", variant: "info" }))
+            .then(() => toast.show({ message: "Copied session location", variant: "info" }))
             .catch(toast.error)
           dialog.clear()
         },
