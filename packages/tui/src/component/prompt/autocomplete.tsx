@@ -273,6 +273,16 @@ export function Autocomplete(props: {
     }
   }
 
+  const references = createMemo(() => data.location.reference.list() ?? [])
+
+  const referenceMatch = createMemo(() => {
+    if (!store.visible || store.visible === "/") return
+    const { baseQuery } = extractLineRange(search())
+    const slash = baseQuery.indexOf("/")
+    const alias = slash === -1 ? baseQuery : baseQuery.slice(0, slash)
+    return references().find((item) => !item.hidden && item.name === alias)
+  })
+
   function normalizeMentionPath(filePath: string) {
     const baseDir = sync.path.directory || paths.cwd
     const absolute = path.resolve(filePath)
@@ -303,6 +313,7 @@ export function Autocomplete(props: {
     () => search(),
     async (query) => {
       if (!store.visible || store.visible === "/") return []
+      if (referenceMatch()) return []
       const { lineRange, baseQuery } = extractLineRange(query ?? "")
 
       // Get files from SDK
@@ -399,6 +410,30 @@ export function Autocomplete(props: {
       )
   })
 
+  const referenceAliases = createMemo(() =>
+    references()
+      .filter((reference) => !reference.hidden)
+      .map(
+        (reference): AutocompleteOption => ({
+          display: "@" + reference.name,
+          description: ` ${reference.source.type === "git" ? reference.source.repository : reference.source.path}`,
+          onSelect: () => {
+            insertPart(reference.name, {
+              type: "file",
+              mime: "application/x-directory",
+              filename: reference.name,
+              url: pathToFileURL(reference.path).href,
+              source: {
+                type: "file",
+                text: { start: 0, end: 0, value: "" },
+                path: reference.name,
+              },
+            })
+          },
+        }),
+      ),
+  )
+
   const commands = createMemo((): AutocompleteOption[] => {
     const results: AutocompleteOption[] = [...slashes()]
 
@@ -430,15 +465,21 @@ export function Autocomplete(props: {
 
   const options = createMemo((prev: AutocompleteOption[] | undefined) => {
     const filesValue = files()
+    const referenceMatchValue = referenceMatch()
     const agentsValue = agents()
+    const referenceAliasesValue = referenceAliases()
     const commandsValue = commands()
     const searchValue = search()
+
+    if (store.visible === "@" && referenceMatchValue) {
+      return referenceAliasesValue.filter((item) => item.display === `@${referenceMatchValue.name}`)
+    }
 
     // Files come from fff already fuzzy ranked and filtered
     // it shouldn't be additionally sorted by fuzzysort as it will loose the results
     const fileOptions: AutocompleteOption[] = store.visible === "@" ? filesValue || [] : []
     const nonFileOptions: AutocompleteOption[] =
-      store.visible === "@" ? [...agentsValue, ...mcpResources()] : [...commandsValue]
+      store.visible === "@" ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()] : [...commandsValue]
 
     if (!searchValue) {
       return [...nonFileOptions, ...fileOptions]
@@ -520,7 +561,7 @@ export function Autocomplete(props: {
     const endCursor = input.logicalCursor
 
     input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
-    input.insertText("@" + path)
+    input.insertText("@" + path + "/")
 
     setStore("selected", 0)
   }

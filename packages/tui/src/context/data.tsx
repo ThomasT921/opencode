@@ -9,6 +9,7 @@ import type {
   PermissionV2Request,
   ProviderV2Info,
   QuestionV2Request,
+  ReferenceInfo,
   SessionMessage,
   SessionMessageAssistant,
   SessionMessageAssistantReasoning,
@@ -27,6 +28,7 @@ type LocationData = {
   command?: CommandV2Info[]
   model?: ModelV2Info[]
   provider?: ProviderV2Info[]
+  reference?: ReferenceInfo[]
   skill?: SkillV2Info[]
 }
 
@@ -416,6 +418,9 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             })
           })
           break
+        case "reference.updated":
+          void result.location.reference.refresh()
+          break
       }
     })
 
@@ -518,6 +523,16 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             setStore("location", key, "provider", result.data.data)
           },
         },
+        reference: {
+          list(location?: LocationRef) {
+            return store.location[locationKey(location ?? defaultLocation())]?.reference
+          },
+          async refresh(ref?: LocationRef) {
+            const result = await sdk.client.v2.reference.list({ location: locationQuery(ref) }, { throwOnError: true })
+            const key = locationKey(result.data.location)
+            setStore("location", key, "reference", result.data.data)
+          },
+        },
         skill: {
           list(location?: LocationRef) {
             return store.location[locationKey(location ?? defaultLocation())]?.skill
@@ -537,6 +552,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         result.location.agent.refresh(),
         result.location.model.refresh(),
         result.location.provider.refresh(),
+        result.location.reference.refresh(),
         result.location.command.refresh(),
         result.location.skill.refresh(),
       ])

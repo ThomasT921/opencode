@@ -94,7 +94,53 @@ test("refreshes resources into reactive getters", async () => {
   }
 })
 
-test("sync v2 settles pending tools when a live failure arrives", async () => {
+test("refreshes references after updates", async () => {
+  const events = createEventSource()
+  let requests = 0
+  const calls = createFetch((url) => {
+    if (url.pathname !== "/api/reference") return
+    requests++
+    return json({
+      location: { directory, project: { id: "proj_test", directory } },
+      data: requests === 1 ? [] : [{ name: "docs", path: "/docs", source: { type: "local", path: "/docs" } }],
+    })
+  })
+  let data!: ReturnType<typeof useData>
+  let ready!: () => void
+  const mounted = new Promise<void>((resolve) => {
+    ready = resolve
+  })
+
+  function Probe() {
+    data = useData()
+    onMount(ready)
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <SDKProvider url="http://test" directory={directory} events={events.source} fetch={calls.fetch}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </SDKProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await mounted
+    await wait(() => requests === 1)
+    emitEvent(events, { id: "evt_reference_1", type: "reference.updated", properties: {} })
+    await wait(() => data.location.reference.list()?.length === 1)
+    expect(data.location.reference.list()?.[0]?.name).toBe("docs")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("settles pending tools when a live failure arrives", async () => {
   const events = createEventSource()
   const calls = createFetch()
   let sync!: ReturnType<typeof useData>
@@ -223,7 +269,7 @@ test("sync v2 settles pending tools when a live failure arrives", async () => {
   }
 })
 
-test("sync v2 renders admitted prompts only after promotion", async () => {
+test("renders admitted prompts only after promotion", async () => {
   const events = createEventSource()
   const calls = createFetch()
   let sync!: ReturnType<typeof useData>
@@ -287,7 +333,7 @@ test("sync v2 renders admitted prompts only after promotion", async () => {
   }
 })
 
-test("sync v2 renders a promoted prompt when admission was missed", async () => {
+test("renders a promoted prompt when admission was missed", async () => {
   const events = createEventSource()
   const calls = createFetch()
   let sync!: ReturnType<typeof useData>
@@ -335,7 +381,7 @@ test("sync v2 renders a promoted prompt when admission was missed", async () => 
   }
 })
 
-test("sync v2 projects live context updates with their message ID", async () => {
+test("projects live context updates with their message ID", async () => {
   const events = createEventSource()
   const calls = createFetch()
   let sync!: ReturnType<typeof useData>
