@@ -41,6 +41,8 @@ import { LLMClient } from "@opencode-ai/llm"
 import { RequestExecutor } from "@opencode-ai/llm/route"
 import * as SessionRunnerLLM from "./session/runner/llm"
 import { SessionRunnerModel } from "./session/runner/model"
+import { ProjectCopy } from "./project/copy"
+import { Git } from "./git"
 import { SystemContextBuiltIns } from "./system-context/builtins"
 import { FetchHttpClient } from "effect/unstable/http"
 
@@ -65,6 +67,7 @@ export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("
       Watcher.locationLayer,
       Pty.locationLayer,
       SkillV2.locationLayer,
+      ProjectCopy.locationLayer,
       systemContext,
       LocationMutation.locationLayer.pipe(Layer.orDie),
     ).pipe(Layer.provideMerge(location))
@@ -119,6 +122,7 @@ export class LocationServiceMap extends LayerMap.Service<LocationServiceMap>()("
     ModelsDev.defaultLayer,
     FSUtil.defaultLayer,
     AppProcess.defaultLayer,
+    Git.defaultLayer,
     Global.defaultLayer,
     Ripgrep.defaultLayer,
     Database.defaultLayer,

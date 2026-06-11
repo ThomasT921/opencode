@@ -106,4 +106,43 @@ describe("project directories and copies endpoints", () => {
       }),
     { git: true },
   )
+
+  it.instance(
+    "expands the configured project copy directory template",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const current = yield* request(test.directory, "/project/current")
+        const projectID = (yield* json<{ id: string }>(current)).id
+        const response = yield* request(test.directory, `/experimental/project/${projectID}/copy`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Fix / Auth: Please" }),
+        })
+
+        expect(response.status).toBe(200)
+        expect((yield* json<{ directory: string }>(response)).directory).toBe(
+          path.join(test.directory, "copies", `${path.basename(test.directory)}-${projectID}-fix-auth-please`),
+        )
+
+        const duplicate = yield* request(test.directory, `/experimental/project/${projectID}/copy`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Fix / Auth: Please" }),
+        })
+        expect(duplicate.status).toBe(200)
+        expect((yield* json<{ directory: string }>(duplicate)).directory).toBe(
+          path.join(test.directory, "copies", `${path.basename(test.directory)}-${projectID}-fix-auth-please-2`),
+        )
+      }),
+    {
+      git: true,
+      config: {
+        projectCopy: {
+          strategy: "git_worktree",
+          directory: "{project.directory}/copies/{project.name}-{project.id}-{name}",
+        },
+      },
+    },
+  )
 })

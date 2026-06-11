@@ -18,6 +18,7 @@ import { ConfigFormatter } from "./config/formatter"
 import { ConfigLSP } from "./config/lsp"
 import { ConfigMCP } from "./config/mcp"
 import { ConfigPlugin } from "./config/plugin"
+import { ConfigProjectCopy } from "./config/project-copy"
 import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
 import { ConfigToolOutput } from "./config/tool-output"
@@ -100,6 +101,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   plugins: ConfigPlugin.Plugins.pipe(Schema.optional).annotate({
     description: "Ordered external plugin packages to load",
+  }),
+  projectCopy: ConfigProjectCopy.Info.pipe(Schema.optional).annotate({
+    description: "Project copy strategy and destination template",
   }),
   experimental: ConfigExperimental.Experimental.pipe(Schema.optional),
   providers: Schema.Record(Schema.String, ConfigProvider.Info).pipe(Schema.optional),

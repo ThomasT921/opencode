@@ -12,18 +12,21 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
 import { ProjectCopy } from "@opencode-ai/core/project/copy"
+import { PluginV2 } from "@opencode-ai/core/plugin"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 const databaseLayer = Database.layerFromPath(":memory:")
 const eventLayer = EventV2.layer.pipe(Layer.provide(databaseLayer))
+const pluginLayer = PluginV2.layer.pipe(Layer.provide(eventLayer))
 const copyLayer = ProjectCopy.layer.pipe(
   Layer.provide(databaseLayer),
   Layer.provide(eventLayer),
   Layer.provide(FSUtil.defaultLayer),
   Layer.provide(Git.defaultLayer),
+  Layer.provide(pluginLayer),
 )
-const it = testEffect(Layer.mergeAll(copyLayer, databaseLayer, eventLayer))
+const it = testEffect(Layer.mergeAll(copyLayer, databaseLayer, eventLayer, pluginLayer))
 
 function abs(input: string) {
   return AbsolutePath.make(input)
@@ -131,6 +134,58 @@ describe("ProjectCopy", () => {
     }),
   )
 
+  it.live("runs the before create hook before resolving the destination", () =>
+    Effect.gen(function* () {
+      const input = yield* setup()
+      const copy = yield* ProjectCopy.Service
+      const plugins = yield* PluginV2.Service
+      const temp = yield* Effect.promise(() => fs.realpath(path.dirname(input.root.path)))
+      const parent = abs(path.join(temp, path.basename(input.root.path) + "-copy-hook"))
+      const target = abs(path.join(parent, "configured"))
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => fs.rm(parent, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      yield* plugins.add({
+        id: PluginV2.ID.make("project-copy-test"),
+        effect: Effect.succeed({
+          "projectCopy.create.before": Effect.fn(function* (event) {
+            event.directory = parent
+            event.name = "configured"
+          }),
+        }),
+      })
+
+      const created = yield* copy.create({
+        projectID: input.projectID,
+        strategy: "git_worktree",
+        sourceDirectory: input.sourceDirectory,
+        directory: abs(path.join(temp, "unused")),
+        name: "unused",
+      })
+
+      expect(created.directory).toBe(target)
+      yield* copy.remove({ projectID: input.projectID, directory: created.directory, force: false })
+    }),
+  )
+
+  it.live("fails when the before create hook leaves the destination incomplete", () =>
+    Effect.gen(function* () {
+      const input = yield* setup()
+      const copy = yield* ProjectCopy.Service
+
+      const error = yield* copy
+        .create({
+          projectID: input.projectID,
+          strategy: "git_worktree",
+          sourceDirectory: input.sourceDirectory,
+        })
+        .pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(ProjectCopy.CreateUnavailableError)
+      expect(yield* stored(input.projectID)).toEqual([{ directory: input.sourceDirectory, type: "main" }])
+    }),
+  )
+
   it.live("requires force to remove a dirty git worktree", () =>
     Effect.gen(function* () {
       const input = yield* setup()
@@ -163,71 +218,6 @@ describe("ProjectCopy", () => {
 
       yield* copy.remove({ projectID: input.projectID, directory: created.directory, force: true })
       expect(yield* Effect.promise(() => Bun.file(created.directory).exists())).toBe(false)
-    }),
-  )
-
-  it.live("adds a numeric suffix when a copy directory already exists", () =>
-    Effect.gen(function* () {
-      const input = yield* setup()
-      const copy = yield* ProjectCopy.Service
-      const temp = yield* Effect.promise(() => fs.realpath(path.dirname(input.root.path)))
-      const parent = abs(path.join(temp, path.basename(input.root.path) + "-copy-suffix"))
-      const target = abs(path.join(parent, "copy-3"))
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(parent, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      yield* Effect.promise(() => fs.mkdir(path.join(parent, "copy"), { recursive: true }))
-      yield* Effect.promise(() => fs.mkdir(path.join(parent, "copy-2")))
-
-      const created = yield* copy.create({
-        projectID: input.projectID,
-        strategy: "git_worktree",
-        sourceDirectory: input.sourceDirectory,
-        directory: parent,
-        name: "copy",
-      })
-
-      expect(created.directory).toBe(target)
-      expect(yield* Effect.promise(() => fs.stat(path.join(parent, "copy")).then((item) => item.isDirectory()))).toBe(
-        true,
-      )
-      expect(yield* Effect.promise(() => fs.stat(path.join(parent, "copy-2")).then((item) => item.isDirectory()))).toBe(
-        true,
-      )
-
-      yield* copy.remove({ projectID: input.projectID, directory: created.directory, force: false })
-    }),
-  )
-
-  it.live("fails after ten copy directory conflicts", () =>
-    Effect.gen(function* () {
-      const input = yield* setup()
-      const copy = yield* ProjectCopy.Service
-      const temp = yield* Effect.promise(() => fs.realpath(path.dirname(input.root.path)))
-      const parent = abs(path.join(temp, path.basename(input.root.path) + "-copy-conflicts"))
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(parent, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      yield* Effect.promise(() =>
-        Promise.all(
-          Array.from({ length: 10 }, (_, index) =>
-            fs.mkdir(path.join(parent, index === 0 ? "copy" : `copy-${index + 1}`), { recursive: true }),
-          ),
-        ),
-      )
-
-      const error = yield* copy
-        .create({
-          projectID: input.projectID,
-          strategy: "git_worktree",
-          sourceDirectory: input.sourceDirectory,
-          directory: parent,
-          name: "copy",
-        })
-        .pipe(Effect.flip)
-
-      expect(error).toBeInstanceOf(ProjectCopy.DestinationExistsError)
-      expect(error.directory).toBe(abs(path.join(parent, "copy-10")))
     }),
   )
 

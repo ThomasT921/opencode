@@ -87,6 +87,22 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("migrates project copy configuration", () =>
+    Effect.sync(() => {
+      expect(
+        ConfigMigrateV1.migrate({
+          projectCopy: {
+            strategy: "git_worktree",
+            directory: "{project.directory}/.worktrees/{project.name}-{project.id}-{name}",
+          },
+        }).projectCopy,
+      ).toEqual({
+        strategy: "git_worktree",
+        directory: "{project.directory}/.worktrees/{project.name}-{project.id}-{name}",
+      })
+    }),
+  )
+
   it.effect("migrates v1 provider setup options into AISDK settings", () =>
     Effect.sync(() => {
       const migrated = ConfigMigrateV1.migrate({

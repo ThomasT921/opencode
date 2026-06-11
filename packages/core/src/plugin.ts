@@ -7,6 +7,7 @@ import type { ModelV2 } from "./model"
 import type { Catalog } from "./catalog"
 import { EventV2 } from "./event"
 import { KeyedMutex } from "./effect/keyed-mutex"
+import { LayerNode } from "./effect/layer-node"
 
 export const ID = Schema.String.pipe(Schema.brand("Plugin.ID"))
 export type ID = typeof ID.Type
@@ -32,6 +33,19 @@ type HookSpec = {
       to?: import("./auth").Auth.ID
     }
     output: {}
+  }
+  "projectCopy.create.before": {
+    input: {
+      projectID: import("./project").Project.ID
+      sourceDirectory: import("./schema").AbsolutePath
+      context?: string
+    }
+    output: {
+      strategy: import("./project/copy").ProjectCopy.StrategyID
+      directory?: import("./schema").AbsolutePath
+      name?: string
+      error?: import("./project/copy").ProjectCopy.DestinationExistsError
+    }
   }
   "aisdk.language": {
     input: {
@@ -189,6 +203,7 @@ export const layer = Layer.effect(
 )
 
 export const locationLayer = layer
+export const node = LayerNode.make(layer, [EventV2.node])
 
 // opencode
 // sdcok

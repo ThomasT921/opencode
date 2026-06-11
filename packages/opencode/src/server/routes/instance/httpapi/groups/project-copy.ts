@@ -17,8 +17,8 @@ const CopyQuery = Schema.Struct({
 })
 
 export const CreatePayload = Schema.Struct({
-  strategy: ProjectCopy.StrategyID,
-  directory: ProjectCopy.CreateInput.fields.directory,
+  strategy: Schema.optional(ProjectCopy.CreateInput.fields.strategy),
+  directory: Schema.optional(ProjectCopy.CreateInput.fields.directory),
   name: ProjectCopy.CreateInput.fields.name,
   context: ProjectCopy.CreateInput.fields.context,
 })

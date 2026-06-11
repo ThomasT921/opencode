@@ -12,7 +12,7 @@ import { LayerNode } from "../effect/layer-node"
 import { Project } from "../project"
 import { ProjectDirectoryTable } from "./sql"
 import { makeStrategies } from "./copy-strategies"
-import { Slug } from "../util/slug"
+import { PluginV2 } from "../plugin"
 
 export const StrategyID = Schema.Literal("git_worktree")
 export type StrategyID = typeof StrategyID.Type
@@ -26,7 +26,7 @@ export const CreateInput = Schema.Struct({
   projectID: Project.ID,
   strategy: StrategyID,
   sourceDirectory: AbsolutePath,
-  directory: AbsolutePath,
+  directory: Schema.optional(AbsolutePath),
   name: Schema.optional(Schema.String),
   context: Schema.optional(Schema.String),
 }).annotate({ identifier: "ProjectCopy.CreateInput" })
@@ -71,11 +71,20 @@ export class StrategyNotFoundError extends Schema.TaggedErrorClass<StrategyNotFo
   { directory: AbsolutePath },
 ) {}
 
+export class CreateUnavailableError extends Schema.TaggedErrorClass<CreateUnavailableError>()(
+  "ProjectCopy.CreateUnavailableError",
+  {
+    directory: Schema.optional(AbsolutePath),
+    name: Schema.optional(Schema.String),
+  },
+) {}
+
 export type Error =
   | SourceDirectoryNotFoundError
   | DestinationExistsError
   | DirectoryUnavailableError
   | StrategyNotFoundError
+  | CreateUnavailableError
   | Git.WorktreeError
 
 export interface Strategy {
@@ -115,6 +124,7 @@ export const layer = Layer.effect(
     const git = yield* Git.Service
     const events = yield* EventV2.Service
     const db = (yield* Database.Service).db
+    const plugin = yield* PluginV2.Service
 
     const canonical = Effect.fnUntraced(function* (input: AbsolutePath) {
       const resolved = AbsolutePath.make(FSUtil.resolve(input))
@@ -192,21 +202,31 @@ export const layer = Layer.effect(
     })
 
     const create = Effect.fn("ProjectCopy.create")(function* (input: CreateInput) {
-      yield* fs.makeDirectory(input.directory, { recursive: true }).pipe(Effect.orDie)
-      const name = input.name ?? Slug.create()
-      let suffix = 1
-      let copyDirectory = AbsolutePath.make(path.join(input.directory, name))
-      while (yield* fs.existsSafe(copyDirectory)) {
-        suffix++
-        if (suffix > 10) return yield* new DestinationExistsError({ directory: copyDirectory })
-        copyDirectory = AbsolutePath.make(path.join(input.directory, `${name}-${suffix}`))
-      }
+      const resolved = yield* plugin.trigger(
+        "projectCopy.create.before",
+        {
+          projectID: input.projectID,
+          sourceDirectory: input.sourceDirectory,
+          context: input.context,
+        },
+        {
+          strategy: input.strategy,
+          directory: input.directory,
+          name: input.name,
+        },
+      )
+      if (resolved.error) return yield* resolved.error
+      if (!resolved.directory || !resolved.name)
+        return yield* new CreateUnavailableError({ directory: resolved.directory, name: resolved.name })
 
-      const result = yield* strategy(input.strategy).create({
+      yield* fs.makeDirectory(resolved.directory, { recursive: true }).pipe(Effect.orDie)
+      const copyDirectory = AbsolutePath.make(path.join(resolved.directory, resolved.name))
+
+      const result = yield* strategy(resolved.strategy).create({
         directory: copyDirectory,
         sourceDirectory: yield* source(input.sourceDirectory, input.projectID),
       })
-      yield* changed(input.projectID, yield* insert(input.projectID, result.directory, input.strategy))
+      yield* changed(input.projectID, yield* insert(input.projectID, result.directory, resolved.strategy))
       return result
     })
 
@@ -270,10 +290,6 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(
-  Layer.provide(Database.defaultLayer),
-  Layer.provide(FSUtil.defaultLayer),
-  Layer.provide(Git.defaultLayer),
-  Layer.provide(EventV2.defaultLayer),
-)
-export const node = LayerNode.make(layer, [FSUtil.node, Git.node, EventV2.node, Database.node])
+export const locationLayer = layer.pipe(Layer.provide(PluginV2.locationLayer))
+
+export const node = LayerNode.make(layer, [FSUtil.node, Git.node, EventV2.node, Database.node, PluginV2.node])

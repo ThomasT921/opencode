@@ -2,8 +2,10 @@ import { ProjectCopy } from "@opencode-ai/core/project/copy"
 import { Git } from "@opencode-ai/core/git"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { LocationServiceMap } from "@opencode-ai/core/location-layer"
+import { PluginBoot } from "@opencode-ai/core/plugin/boot"
 import { InstanceState } from "@/effect/instance-state"
-import { Effect, Stream } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiProjectCopyError, CreatePayload, RemovePayload } from "../groups/project-copy"
@@ -43,7 +45,7 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
     const llm = yield* LLM.Service
     const agent = yield* Agent.Service
     const provider = yield* Provider.Service
-    const service = yield* ProjectCopy.Service
+    const locations = yield* LocationServiceMap
 
     const generateName = Effect.fn("ProjectCopyHttpApi.generateName")(function* (context: string | undefined) {
       const text = context?.trim()
@@ -85,11 +87,7 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
             },
           ],
         })
-        .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((event) => event.text),
-          Stream.mkString,
-        )
+        .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((event) => event.text), Stream.mkString)
       const output = result.trim()
       return output ? slugify(output.split(/\s+/).slice(0, 4).join(" ")) : Slug.create()
     })
@@ -101,13 +99,18 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
       const name =
         ctx.payload.name ??
         (yield* generateName(ctx.payload.context).pipe(Effect.catch(() => Effect.succeed(Slug.create()))))
+      const instance = yield* InstanceState.context
       return yield* badRequest(
-        service.create({
-          ...ctx.payload,
-          name,
-          projectID: ctx.params.projectID,
-          sourceDirectory: AbsolutePath.make((yield* InstanceState.context).worktree),
-        }),
+        Effect.gen(function* () {
+          yield* (yield* PluginBoot.Service).wait()
+          return yield* (yield* ProjectCopy.Service).create({
+            ...ctx.payload,
+            strategy: ctx.payload.strategy ?? "git_worktree",
+            name,
+            projectID: ctx.params.projectID,
+            sourceDirectory: AbsolutePath.make(instance.worktree),
+          })
+        }).pipe(Effect.provide(locations.get({ directory: AbsolutePath.make(instance.directory) }))),
       )
     })
 
@@ -115,25 +118,29 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
       params: { projectID: ProjectV2.ID }
       payload: typeof RemovePayload.Type
     }) {
+      const instance = yield* InstanceState.context
       yield* badRequest(
-        service.remove({
-          ...ctx.payload,
-          projectID: ctx.params.projectID,
-        }),
+        ProjectCopy.Service.use((service) =>
+          service.remove({
+            ...ctx.payload,
+            projectID: ctx.params.projectID,
+          }),
+        ).pipe(Effect.provide(locations.get({ directory: AbsolutePath.make(instance.directory) }))),
       )
     })
 
     const refresh = Effect.fn("ProjectCopyHttpApi.refresh")(function* (ctx: { params: { projectID: ProjectV2.ID } }) {
+      const instance = yield* InstanceState.context
       yield* badRequest(
-        service.refresh({
-          projectID: ctx.params.projectID,
-        }),
+        ProjectCopy.Service.use((service) => service.refresh({ projectID: ctx.params.projectID })).pipe(
+          Effect.provide(locations.get({ directory: AbsolutePath.make(instance.directory) })),
+        ),
       )
     })
 
     return handlers.handle("create", create).handle("remove", remove).handle("refresh", refresh)
   }),
-)
+).pipe(Layer.provide(LocationServiceMap.layer))
 
 function slugify(input: string) {
   return input
@@ -153,5 +160,7 @@ function message(error: ProjectCopy.Error) {
     return `Project copy directory unavailable: ${error.directory}`
   if (error instanceof ProjectCopy.StrategyNotFoundError)
     return `Project copy strategy not found for: ${error.directory}`
+  if (error instanceof ProjectCopy.CreateUnavailableError)
+    return "Project copy directory and name could not be resolved"
   return error.message
 }

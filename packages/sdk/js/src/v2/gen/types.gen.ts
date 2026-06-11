@@ -67,6 +67,7 @@ export type Event =
   | EventQuestionV2Replied
   | EventQuestionV2Rejected
   | EventTodoUpdated
+  | EventProjectDirectoriesUpdated
   | EventLspUpdated
   | EventPermissionAsked
   | EventPermissionReplied
@@ -77,7 +78,6 @@ export type Event =
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
-  | EventProjectDirectoriesUpdated
   | EventProjectUpdated
   | EventVcsBranchUpdated
   | EventQuestionAsked
@@ -1380,6 +1380,13 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "project.directories.updated"
+        properties: {
+          projectID: string
+        }
+      }
+    | {
+        id: string
         type: "lsp.updated"
         properties: {
           [key: string]: unknown
@@ -1486,13 +1493,6 @@ export type GlobalEvent = {
           sessionID: string
           arguments: string
           messageID: string
-        }
-      }
-    | {
-        id: string
-        type: "project.directories.updated"
-        properties: {
-          projectID: string
         }
       }
     | {
@@ -1936,6 +1936,10 @@ export type Config = {
   }
   watcher?: {
     ignore?: Array<string>
+  }
+  projectCopy?: {
+    strategy?: "git_worktree"
+    directory?: string
   }
   snapshot?: boolean
   plugin?: Array<
@@ -5005,6 +5009,14 @@ export type EventTodoUpdated = {
   }
 }
 
+export type EventProjectDirectoriesUpdated = {
+  id: string
+  type: "project.directories.updated"
+  properties: {
+    projectID: string
+  }
+}
+
 export type EventLspUpdated = {
   id: string
   type: "lsp.updated"
@@ -5067,14 +5079,6 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
-  }
-}
-
-export type EventProjectDirectoriesUpdated = {
-  id: string
-  type: "project.directories.updated"
-  properties: {
-    projectID: string
   }
 }
 
@@ -7013,8 +7017,8 @@ export type ExperimentalProjectCopyRemoveResponse =
 
 export type ExperimentalProjectCopyCreateData = {
   body?: {
-    strategy: "git_worktree"
-    directory: string
+    strategy?: "git_worktree"
+    directory?: string
     name?: string
     context?: string
   }
