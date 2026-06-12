@@ -128,28 +128,58 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      /**
       * Terminates the current session by sending a DELETE request to the server.
 diff --git a/dist/cjs/client/streamableHttp.js b/dist/cjs/client/streamableHttp.js
-index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87c73e4b89 100644
+index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2af962432 100644
 --- a/dist/cjs/client/streamableHttp.js
 +++ b/dist/cjs/client/streamableHttp.js
-@@ -290,7 +290,46 @@ class StreamableHTTPClientTransport {
+@@ -85,6 +85,7 @@ class StreamableHTTPClientTransport {
+             // Try to open an initial SSE stream with GET to listen for server messages
+             // This is optional according to the spec - server may not support it
+             const headers = await this._commonHeaders();
++            const requestSessionId = headers.get('mcp-session-id') ?? undefined;
+             headers.set('Accept', 'text/event-stream');
+             // Include Last-Event-ID header for resumable streams if provided
+             if (resumptionToken) {
+@@ -97,6 +98,11 @@ class StreamableHTTPClientTransport {
+             });
+             if (!response.ok) {
+                 await response.body?.cancel();
++                if (response.status === 404 && requestSessionId) {
++                    if (await this._recoverSession(requestSessionId, true)) {
++                        return;
++                    }
++                }
+                 if (response.status === 401 && this._authProvider) {
+                     // Need to authenticate
+                     return await this._authThenStart();
+@@ -290,7 +296,56 @@ class StreamableHTTPClientTransport {
          this.onclose?.();
      }
      async send(message, options) {
 +        return this._send(message, options, false);
 +    }
-+    async _recoverSession(expiredSessionId) {
++    async _recoverSession(expiredSessionId, waitForCurrent = false, force = false) {
 +        if (this._sessionRecovery) {
 +            if (this._recoveringSessionId !== expiredSessionId) {
-+                if (this._sessionId === expiredSessionId) {
-+                    this._sessionId = undefined;
++                if (!waitForCurrent) {
++                    if (this._sessionId === expiredSessionId) {
++                        this._sessionId = undefined;
++                    }
++                    return false;
 +                }
-+                return false;
++                await this._sessionRecovery.catch(() => undefined);
++                if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
++                    return true;
++                }
++                return this._recoverSession(expiredSessionId, false, true);
 +            }
 +            await this._sessionRecovery;
 +            return this._sessionId !== undefined;
 +        }
-+        if (this._sessionId !== expiredSessionId) {
++        if (!force && this._sessionId !== expiredSessionId) {
 +            return this._sessionId !== undefined;
++        }
++        if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
++            return true;
 +        }
 +        this._sessionId = undefined;
 +        this._recoveringSessionId = expiredSessionId;
@@ -178,7 +208,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87
              const { resumptionToken, onresumptiontoken } = options || {};
              if (resumptionToken) {
                  // If we have at last event ID, we need to reconnect the SSE stream
-@@ -298,6 +337,7 @@ class StreamableHTTPClientTransport {
+@@ -298,6 +353,7 @@ class StreamableHTTPClientTransport {
                  return;
              }
              const headers = await this._commonHeaders();
@@ -186,7 +216,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -315,6 +355,11 @@ class StreamableHTTPClientTransport {
+@@ -315,6 +371,11 @@ class StreamableHTTPClientTransport {
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
@@ -198,7 +228,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87
                  if (response.status === 401 && this._authProvider) {
                      // Prevent infinite recursion when server returns 401 after successful auth
                      if (this._hasCompletedAuthFlow) {
-@@ -335,7 +380,7 @@ class StreamableHTTPClientTransport {
+@@ -335,7 +396,7 @@ class StreamableHTTPClientTransport {
                      // Mark that we completed auth flow
                      this._hasCompletedAuthFlow = true;
                      // Purposely _not_ awaited, so we don't call onerror twice
@@ -207,7 +237,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87
                  }
                  if (response.status === 403 && this._authProvider) {
                      const { resourceMetadataUrl, scope, error } = (0, auth_js_1.extractWWWAuthenticateParams)(response);
-@@ -362,7 +407,7 @@ class StreamableHTTPClientTransport {
+@@ -362,7 +423,7 @@ class StreamableHTTPClientTransport {
                          if (result !== 'AUTHORIZED') {
                              throw new auth_js_1.UnauthorizedError();
                          }
@@ -346,7 +376,7 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      /**
       * Terminates the current session by sending a DELETE request to the server.
 diff --git a/dist/esm/client/streamableHttp.js b/dist/esm/client/streamableHttp.js
-index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840fdac1b92b 100644
+index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2f458faff 100644
 --- a/dist/esm/client/streamableHttp.js
 +++ b/dist/esm/client/streamableHttp.js
 @@ -1,5 +1,5 @@
@@ -356,25 +386,55 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840f
  import { auth, extractWWWAuthenticateParams, UnauthorizedError } from './auth.js';
  import { EventSourceParserStream } from 'eventsource-parser/stream';
  // Default reconnection options for StreamableHTTP connections
-@@ -286,7 +286,46 @@ export class StreamableHTTPClientTransport {
+@@ -81,6 +81,7 @@ export class StreamableHTTPClientTransport {
+             // Try to open an initial SSE stream with GET to listen for server messages
+             // This is optional according to the spec - server may not support it
+             const headers = await this._commonHeaders();
++            const requestSessionId = headers.get('mcp-session-id') ?? undefined;
+             headers.set('Accept', 'text/event-stream');
+             // Include Last-Event-ID header for resumable streams if provided
+             if (resumptionToken) {
+@@ -93,6 +94,11 @@ export class StreamableHTTPClientTransport {
+             });
+             if (!response.ok) {
+                 await response.body?.cancel();
++                if (response.status === 404 && requestSessionId) {
++                    if (await this._recoverSession(requestSessionId, true)) {
++                        return;
++                    }
++                }
+                 if (response.status === 401 && this._authProvider) {
+                     // Need to authenticate
+                     return await this._authThenStart();
+@@ -286,7 +292,56 @@ export class StreamableHTTPClientTransport {
          this.onclose?.();
      }
      async send(message, options) {
 +        return this._send(message, options, false);
 +    }
-+    async _recoverSession(expiredSessionId) {
++    async _recoverSession(expiredSessionId, waitForCurrent = false, force = false) {
 +        if (this._sessionRecovery) {
 +            if (this._recoveringSessionId !== expiredSessionId) {
-+                if (this._sessionId === expiredSessionId) {
-+                    this._sessionId = undefined;
++                if (!waitForCurrent) {
++                    if (this._sessionId === expiredSessionId) {
++                        this._sessionId = undefined;
++                    }
++                    return false;
 +                }
-+                return false;
++                await this._sessionRecovery.catch(() => undefined);
++                if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
++                    return true;
++                }
++                return this._recoverSession(expiredSessionId, false, true);
 +            }
 +            await this._sessionRecovery;
 +            return this._sessionId !== undefined;
 +        }
-+        if (this._sessionId !== expiredSessionId) {
++        if (!force && this._sessionId !== expiredSessionId) {
 +            return this._sessionId !== undefined;
++        }
++        if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
++            return true;
 +        }
 +        this._sessionId = undefined;
 +        this._recoveringSessionId = expiredSessionId;
@@ -403,7 +463,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840f
              const { resumptionToken, onresumptiontoken } = options || {};
              if (resumptionToken) {
                  // If we have at last event ID, we need to reconnect the SSE stream
-@@ -294,6 +333,7 @@ export class StreamableHTTPClientTransport {
+@@ -294,6 +349,7 @@ export class StreamableHTTPClientTransport {
                  return;
              }
              const headers = await this._commonHeaders();
@@ -411,7 +471,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840f
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -311,6 +351,11 @@ export class StreamableHTTPClientTransport {
+@@ -311,6 +367,11 @@ export class StreamableHTTPClientTransport {
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
@@ -423,7 +483,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840f
                  if (response.status === 401 && this._authProvider) {
                      // Prevent infinite recursion when server returns 401 after successful auth
                      if (this._hasCompletedAuthFlow) {
-@@ -331,7 +376,7 @@ export class StreamableHTTPClientTransport {
+@@ -331,7 +392,7 @@ export class StreamableHTTPClientTransport {
                      // Mark that we completed auth flow
                      this._hasCompletedAuthFlow = true;
                      // Purposely _not_ awaited, so we don't call onerror twice
@@ -432,7 +492,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840f
                  }
                  if (response.status === 403 && this._authProvider) {
                      const { resourceMetadataUrl, scope, error } = extractWWWAuthenticateParams(response);
-@@ -358,7 +403,7 @@ export class StreamableHTTPClientTransport {
+@@ -358,7 +419,7 @@ export class StreamableHTTPClientTransport {
                          if (result !== 'AUTHORIZED') {
                              throw new UnauthorizedError();
                          }
