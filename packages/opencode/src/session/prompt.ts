@@ -19,6 +19,7 @@ import { Plugin } from "../plugin"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { ToolRegistry } from "@/tool/registry"
 import { MCP } from "../mcp"
+import { McpContent } from "@/mcp/content"
 import { LSP } from "@/lsp/lsp"
 import { ulid } from "ulid"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -729,27 +730,14 @@ export const layer = Layer.effect(
             if (Exit.isSuccess(exit)) {
               const content = exit.value
               if (!content) throw new Error(`Resource not found: ${clientName}/${uri}`)
-              const items = Array.isArray(content.contents) ? content.contents : [content.contents]
-              for (const c of items) {
-                if ("text" in c && c.text) {
-                  pieces.push({
-                    messageID: info.id,
-                    sessionID: input.sessionID,
-                    type: "text",
-                    synthetic: true,
-                    text: c.text,
-                  })
-                } else if ("blob" in c && c.blob) {
-                  const mime = "mimeType" in c ? c.mimeType : part.mime
-                  pieces.push({
-                    messageID: info.id,
-                    sessionID: input.sessionID,
-                    type: "text",
-                    synthetic: true,
-                    text: `[Binary content: ${mime}]`,
-                  })
-                }
-              }
+              pieces.push(
+                ...McpContent.toParts(content.contents).map((item) => ({
+                  ...item,
+                  messageID: info.id,
+                  sessionID: input.sessionID,
+                  ...(item.type === "text" ? { synthetic: true } : {}),
+                })),
+              )
               pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
             } else {
               const error = Cause.squash(exit.cause)

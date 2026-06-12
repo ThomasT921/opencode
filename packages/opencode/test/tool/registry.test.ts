@@ -72,6 +72,8 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
 
       expect(ids).not.toContain("task_status")
+      expect(ids).toContain("list_mcp_resources")
+      expect(ids).toContain("read_mcp_resource")
     }),
   )
 

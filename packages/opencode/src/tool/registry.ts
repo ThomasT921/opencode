@@ -52,6 +52,8 @@ import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { ListMcpResourcesTool, ReadMcpResourceTool } from "./mcp-resource"
+import { MCP } from "@/mcp"
 
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
@@ -105,6 +107,8 @@ export const layer = Layer.effect(
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const listMcpResources = yield* ListMcpResourcesTool
+    const readMcpResource = yield* ReadMcpResourceTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -212,6 +216,8 @@ export const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          listMcpResources: Tool.init(listMcpResources),
+          readMcpResource: Tool.init(readMcpResource),
         })
 
         return {
@@ -231,6 +237,8 @@ export const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
+            tool.listMcpResources,
+            tool.readMcpResource,
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
@@ -335,6 +343,7 @@ export const defaultLayer = Layer.suspend(() =>
       Layer.provide(Format.defaultLayer),
       Layer.provide(CrossSpawnSpawner.defaultLayer),
       Layer.provide(Truncate.defaultLayer),
+      Layer.provide(MCP.defaultLayer),
     )
     .pipe(Layer.provide(Database.defaultLayer), Layer.provide(RuntimeFlags.defaultLayer)),
 )
@@ -435,6 +444,7 @@ export const node = LayerNode.make(layer.pipe(Layer.provide(Ripgrep.defaultLayer
   Truncate.node,
   RuntimeFlags.node,
   Database.node,
+  MCP.node,
 ])
 
 export * as ToolRegistry from "./registry"
