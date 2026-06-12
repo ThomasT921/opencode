@@ -1,0 +1,443 @@
+diff --git a/dist/cjs/client/index.d.ts b/dist/cjs/client/index.d.ts
+index 6f567a193626587a2730b5a49293ca5dfd4181ea..eacfe9a2b20ab8567a256f8af3ccc2a2af1a362b 100644
+--- a/dist/cjs/client/index.d.ts
++++ b/dist/cjs/client/index.d.ts
+@@ -153,6 +153,7 @@ export declare class Client<RequestT extends Request = Request, NotificationT ex
+     setRequestHandler<T extends AnyObjectSchema>(requestSchema: T, handler: (request: SchemaOutput<T>, extra: RequestHandlerExtra<ClientRequest | RequestT, ClientNotification | NotificationT>) => ClientResult | ResultT | Promise<ClientResult | ResultT>): void;
+     protected assertCapability(capability: keyof ServerCapabilities, method: string): void;
+     connect(transport: Transport, options?: RequestOptions): Promise<void>;
++    private _initialize;
+     /**
+      * After initialization has completed, this will be populated with the server's reported capabilities.
+      */
+diff --git a/dist/cjs/client/index.js b/dist/cjs/client/index.js
+index 6ac1da14dc7f6211ae70f7711c124b76098816d8..a840bc93e68182d6913132bb98c8cde3cace4115 100644
+--- a/dist/cjs/client/index.js
++++ b/dist/cjs/client/index.js
+@@ -288,41 +288,19 @@ class Client extends protocol_js_1.Protocol {
+     }
+     async connect(transport, options) {
+         await super.connect(transport);
++        transport.onsessionexpired = async () => {
++            this._serverCapabilities = undefined;
++            this._serverVersion = undefined;
++            this._instructions = undefined;
++            await this._initialize(transport, options);
++        };
+         // When transport sessionId is already set this means we are trying to reconnect.
+         // In this case we don't need to initialize again.
+         if (transport.sessionId !== undefined) {
+             return;
+         }
+         try {
+-            const result = await this.request({
+-                method: 'initialize',
+-                params: {
+-                    protocolVersion: types_js_1.LATEST_PROTOCOL_VERSION,
+-                    capabilities: this._capabilities,
+-                    clientInfo: this._clientInfo
+-                }
+-            }, types_js_1.InitializeResultSchema, options);
+-            if (result === undefined) {
+-                throw new Error(`Server sent invalid initialize result: ${result}`);
+-            }
+-            if (!types_js_1.SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
+-                throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
+-            }
+-            this._serverCapabilities = result.capabilities;
+-            this._serverVersion = result.serverInfo;
+-            // HTTP transports must set the protocol version in each header after initialization.
+-            if (transport.setProtocolVersion) {
+-                transport.setProtocolVersion(result.protocolVersion);
+-            }
+-            this._instructions = result.instructions;
+-            await this.notification({
+-                method: 'notifications/initialized'
+-            });
+-            // Set up list changed handlers now that we know server capabilities
+-            if (this._pendingListChangedConfig) {
+-                this._setupListChangedHandlers(this._pendingListChangedConfig);
+-                this._pendingListChangedConfig = undefined;
+-            }
++            await this._initialize(transport, options);
+         }
+         catch (error) {
+             // Disconnect if initialization fails.
+@@ -330,6 +308,37 @@ class Client extends protocol_js_1.Protocol {
+             throw error;
+         }
+     }
++    async _initialize(transport, options) {
++        const result = await this.request({
++            method: 'initialize',
++            params: {
++                protocolVersion: types_js_1.LATEST_PROTOCOL_VERSION,
++                capabilities: this._capabilities,
++                clientInfo: this._clientInfo
++            }
++        }, types_js_1.InitializeResultSchema, options);
++        if (result === undefined) {
++            throw new Error(`Server sent invalid initialize result: ${result}`);
++        }
++        if (!types_js_1.SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
++            throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
++        }
++        this._serverCapabilities = result.capabilities;
++        this._serverVersion = result.serverInfo;
++        // HTTP transports must set the protocol version in each header after initialization.
++        if (transport.setProtocolVersion) {
++            transport.setProtocolVersion(result.protocolVersion);
++        }
++        this._instructions = result.instructions;
++        await this.notification({
++            method: 'notifications/initialized'
++        });
++        // Set up list changed handlers now that we know server capabilities
++        if (this._pendingListChangedConfig) {
++            this._setupListChangedHandlers(this._pendingListChangedConfig);
++            this._pendingListChangedConfig = undefined;
++        }
++    }
+     /**
+      * After initialization has completed, this will be populated with the server's reported capabilities.
+      */
+diff --git a/dist/cjs/client/streamableHttp.d.ts b/dist/cjs/client/streamableHttp.d.ts
+index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8ff60261b 100644
+--- a/dist/cjs/client/streamableHttp.d.ts
++++ b/dist/cjs/client/streamableHttp.d.ts
+@@ -110,9 +110,12 @@ export declare class StreamableHTTPClientTransport implements Transport {
+     private _lastUpscopingHeader?;
+     private _serverRetryMs?;
+     private _reconnectionTimeout?;
++    private _sessionRecovery?;
++    private _recoveringSessionId?;
+     onclose?: () => void;
+     onerror?: (error: Error) => void;
+     onmessage?: (message: JSONRPCMessage) => void;
++    onsessionexpired?: () => void | Promise<void>;
+     constructor(url: URL, opts?: StreamableHTTPClientTransportOptions);
+     private _authThenStart;
+     private _commonHeaders;
+@@ -142,6 +145,8 @@ export declare class StreamableHTTPClientTransport implements Transport {
+         resumptionToken?: string;
+         onresumptiontoken?: (token: string) => void;
+     }): Promise<void>;
++    private _recoverSession;
++    private _send;
+     get sessionId(): string | undefined;
+     /**
+      * Terminates the current session by sending a DELETE request to the server.
+diff --git a/dist/cjs/client/streamableHttp.js b/dist/cjs/client/streamableHttp.js
+index a29a7d3a0f14d9cd800ef5b296485237350c666f..efb99bee59955347b6f89c53b8c90a87c73e4b89 100644
+--- a/dist/cjs/client/streamableHttp.js
++++ b/dist/cjs/client/streamableHttp.js
+@@ -290,7 +290,46 @@ class StreamableHTTPClientTransport {
+         this.onclose?.();
+     }
+     async send(message, options) {
++        return this._send(message, options, false);
++    }
++    async _recoverSession(expiredSessionId) {
++        if (this._sessionRecovery) {
++            if (this._recoveringSessionId !== expiredSessionId) {
++                if (this._sessionId === expiredSessionId) {
++                    this._sessionId = undefined;
++                }
++                return false;
++            }
++            await this._sessionRecovery;
++            return this._sessionId !== undefined;
++        }
++        if (this._sessionId !== expiredSessionId) {
++            return this._sessionId !== undefined;
++        }
++        this._sessionId = undefined;
++        this._recoveringSessionId = expiredSessionId;
++        const recovery = Promise.resolve().then(() => this.onsessionexpired?.());
++        const tracked = recovery.finally(() => {
++            if (this._sessionRecovery === tracked) {
++                this._sessionRecovery = undefined;
++                this._recoveringSessionId = undefined;
++            }
++        });
++        this._sessionRecovery = tracked;
+         try {
++            await tracked;
++        }
++        catch (error) {
++            this._sessionId = undefined;
++            throw error;
++        }
++        return this._sessionId !== undefined;
++    }
++    async _send(message, options, isSessionRetry) {
++        try {
++            if (this._sessionRecovery && !(0, types_js_1.isInitializeRequest)(message) && !(0, types_js_1.isInitializedNotification)(message)) {
++                await this._sessionRecovery;
++            }
+             const { resumptionToken, onresumptiontoken } = options || {};
+             if (resumptionToken) {
+                 // If we have at last event ID, we need to reconnect the SSE stream
+@@ -298,6 +337,7 @@ class StreamableHTTPClientTransport {
+                 return;
+             }
+             const headers = await this._commonHeaders();
++            const requestSessionId = headers.get('mcp-session-id') ?? undefined;
+             headers.set('content-type', 'application/json');
+             headers.set('accept', 'application/json, text/event-stream');
+             const init = {
+@@ -315,6 +355,11 @@ class StreamableHTTPClientTransport {
+             }
+             if (!response.ok) {
+                 const text = await response.text().catch(() => null);
++                if (response.status === 404 && requestSessionId) {
++                    if (await this._recoverSession(requestSessionId) && !isSessionRetry) {
++                        return this._send(message, options, true);
++                    }
++                }
+                 if (response.status === 401 && this._authProvider) {
+                     // Prevent infinite recursion when server returns 401 after successful auth
+                     if (this._hasCompletedAuthFlow) {
+@@ -335,7 +380,7 @@ class StreamableHTTPClientTransport {
+                     // Mark that we completed auth flow
+                     this._hasCompletedAuthFlow = true;
+                     // Purposely _not_ awaited, so we don't call onerror twice
+-                    return this.send(message);
++                    return this._send(message, options, isSessionRetry);
+                 }
+                 if (response.status === 403 && this._authProvider) {
+                     const { resourceMetadataUrl, scope, error } = (0, auth_js_1.extractWWWAuthenticateParams)(response);
+@@ -362,7 +407,7 @@ class StreamableHTTPClientTransport {
+                         if (result !== 'AUTHORIZED') {
+                             throw new auth_js_1.UnauthorizedError();
+                         }
+-                        return this.send(message);
++                        return this._send(message, options, isSessionRetry);
+                     }
+                 }
+                 throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
+diff --git a/dist/esm/client/index.d.ts b/dist/esm/client/index.d.ts
+index 6f567a193626587a2730b5a49293ca5dfd4181ea..eacfe9a2b20ab8567a256f8af3ccc2a2af1a362b 100644
+--- a/dist/esm/client/index.d.ts
++++ b/dist/esm/client/index.d.ts
+@@ -153,6 +153,7 @@ export declare class Client<RequestT extends Request = Request, NotificationT ex
+     setRequestHandler<T extends AnyObjectSchema>(requestSchema: T, handler: (request: SchemaOutput<T>, extra: RequestHandlerExtra<ClientRequest | RequestT, ClientNotification | NotificationT>) => ClientResult | ResultT | Promise<ClientResult | ResultT>): void;
+     protected assertCapability(capability: keyof ServerCapabilities, method: string): void;
+     connect(transport: Transport, options?: RequestOptions): Promise<void>;
++    private _initialize;
+     /**
+      * After initialization has completed, this will be populated with the server's reported capabilities.
+      */
+diff --git a/dist/esm/client/index.js b/dist/esm/client/index.js
+index 49b12c6cd918c457420fef7ad5528a9443d1a191..a4bf651835025b0c6df497063ede63049af0ea5c 100644
+--- a/dist/esm/client/index.js
++++ b/dist/esm/client/index.js
+@@ -284,41 +284,19 @@ export class Client extends Protocol {
+     }
+     async connect(transport, options) {
+         await super.connect(transport);
++        transport.onsessionexpired = async () => {
++            this._serverCapabilities = undefined;
++            this._serverVersion = undefined;
++            this._instructions = undefined;
++            await this._initialize(transport, options);
++        };
+         // When transport sessionId is already set this means we are trying to reconnect.
+         // In this case we don't need to initialize again.
+         if (transport.sessionId !== undefined) {
+             return;
+         }
+         try {
+-            const result = await this.request({
+-                method: 'initialize',
+-                params: {
+-                    protocolVersion: LATEST_PROTOCOL_VERSION,
+-                    capabilities: this._capabilities,
+-                    clientInfo: this._clientInfo
+-                }
+-            }, InitializeResultSchema, options);
+-            if (result === undefined) {
+-                throw new Error(`Server sent invalid initialize result: ${result}`);
+-            }
+-            if (!SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
+-                throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
+-            }
+-            this._serverCapabilities = result.capabilities;
+-            this._serverVersion = result.serverInfo;
+-            // HTTP transports must set the protocol version in each header after initialization.
+-            if (transport.setProtocolVersion) {
+-                transport.setProtocolVersion(result.protocolVersion);
+-            }
+-            this._instructions = result.instructions;
+-            await this.notification({
+-                method: 'notifications/initialized'
+-            });
+-            // Set up list changed handlers now that we know server capabilities
+-            if (this._pendingListChangedConfig) {
+-                this._setupListChangedHandlers(this._pendingListChangedConfig);
+-                this._pendingListChangedConfig = undefined;
+-            }
++            await this._initialize(transport, options);
+         }
+         catch (error) {
+             // Disconnect if initialization fails.
+@@ -326,6 +304,37 @@ export class Client extends Protocol {
+             throw error;
+         }
+     }
++    async _initialize(transport, options) {
++        const result = await this.request({
++            method: 'initialize',
++            params: {
++                protocolVersion: LATEST_PROTOCOL_VERSION,
++                capabilities: this._capabilities,
++                clientInfo: this._clientInfo
++            }
++        }, InitializeResultSchema, options);
++        if (result === undefined) {
++            throw new Error(`Server sent invalid initialize result: ${result}`);
++        }
++        if (!SUPPORTED_PROTOCOL_VERSIONS.includes(result.protocolVersion)) {
++            throw new Error(`Server's protocol version is not supported: ${result.protocolVersion}`);
++        }
++        this._serverCapabilities = result.capabilities;
++        this._serverVersion = result.serverInfo;
++        // HTTP transports must set the protocol version in each header after initialization.
++        if (transport.setProtocolVersion) {
++            transport.setProtocolVersion(result.protocolVersion);
++        }
++        this._instructions = result.instructions;
++        await this.notification({
++            method: 'notifications/initialized'
++        });
++        // Set up list changed handlers now that we know server capabilities
++        if (this._pendingListChangedConfig) {
++            this._setupListChangedHandlers(this._pendingListChangedConfig);
++            this._pendingListChangedConfig = undefined;
++        }
++    }
+     /**
+      * After initialization has completed, this will be populated with the server's reported capabilities.
+      */
+diff --git a/dist/esm/client/streamableHttp.d.ts b/dist/esm/client/streamableHttp.d.ts
+index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8ff60261b 100644
+--- a/dist/esm/client/streamableHttp.d.ts
++++ b/dist/esm/client/streamableHttp.d.ts
+@@ -110,9 +110,12 @@ export declare class StreamableHTTPClientTransport implements Transport {
+     private _lastUpscopingHeader?;
+     private _serverRetryMs?;
+     private _reconnectionTimeout?;
++    private _sessionRecovery?;
++    private _recoveringSessionId?;
+     onclose?: () => void;
+     onerror?: (error: Error) => void;
+     onmessage?: (message: JSONRPCMessage) => void;
++    onsessionexpired?: () => void | Promise<void>;
+     constructor(url: URL, opts?: StreamableHTTPClientTransportOptions);
+     private _authThenStart;
+     private _commonHeaders;
+@@ -142,6 +145,8 @@ export declare class StreamableHTTPClientTransport implements Transport {
+         resumptionToken?: string;
+         onresumptiontoken?: (token: string) => void;
+     }): Promise<void>;
++    private _recoverSession;
++    private _send;
+     get sessionId(): string | undefined;
+     /**
+      * Terminates the current session by sending a DELETE request to the server.
+diff --git a/dist/esm/client/streamableHttp.js b/dist/esm/client/streamableHttp.js
+index 624172aa24ae255a67c083f9c19053343e4a0581..f22a2543bc824961a02ad1e0d898840fdac1b92b 100644
+--- a/dist/esm/client/streamableHttp.js
++++ b/dist/esm/client/streamableHttp.js
+@@ -1,5 +1,5 @@
+ import { createFetchWithInit, normalizeHeaders } from '../shared/transport.js';
+-import { isInitializedNotification, isJSONRPCRequest, isJSONRPCResultResponse, JSONRPCMessageSchema } from '../types.js';
++import { isInitializedNotification, isInitializeRequest, isJSONRPCRequest, isJSONRPCResultResponse, JSONRPCMessageSchema } from '../types.js';
+ import { auth, extractWWWAuthenticateParams, UnauthorizedError } from './auth.js';
+ import { EventSourceParserStream } from 'eventsource-parser/stream';
+ // Default reconnection options for StreamableHTTP connections
+@@ -286,7 +286,46 @@ export class StreamableHTTPClientTransport {
+         this.onclose?.();
+     }
+     async send(message, options) {
++        return this._send(message, options, false);
++    }
++    async _recoverSession(expiredSessionId) {
++        if (this._sessionRecovery) {
++            if (this._recoveringSessionId !== expiredSessionId) {
++                if (this._sessionId === expiredSessionId) {
++                    this._sessionId = undefined;
++                }
++                return false;
++            }
++            await this._sessionRecovery;
++            return this._sessionId !== undefined;
++        }
++        if (this._sessionId !== expiredSessionId) {
++            return this._sessionId !== undefined;
++        }
++        this._sessionId = undefined;
++        this._recoveringSessionId = expiredSessionId;
++        const recovery = Promise.resolve().then(() => this.onsessionexpired?.());
++        const tracked = recovery.finally(() => {
++            if (this._sessionRecovery === tracked) {
++                this._sessionRecovery = undefined;
++                this._recoveringSessionId = undefined;
++            }
++        });
++        this._sessionRecovery = tracked;
+         try {
++            await tracked;
++        }
++        catch (error) {
++            this._sessionId = undefined;
++            throw error;
++        }
++        return this._sessionId !== undefined;
++    }
++    async _send(message, options, isSessionRetry) {
++        try {
++            if (this._sessionRecovery && !isInitializeRequest(message) && !isInitializedNotification(message)) {
++                await this._sessionRecovery;
++            }
+             const { resumptionToken, onresumptiontoken } = options || {};
+             if (resumptionToken) {
+                 // If we have at last event ID, we need to reconnect the SSE stream
+@@ -294,6 +333,7 @@ export class StreamableHTTPClientTransport {
+                 return;
+             }
+             const headers = await this._commonHeaders();
++            const requestSessionId = headers.get('mcp-session-id') ?? undefined;
+             headers.set('content-type', 'application/json');
+             headers.set('accept', 'application/json, text/event-stream');
+             const init = {
+@@ -311,6 +351,11 @@ export class StreamableHTTPClientTransport {
+             }
+             if (!response.ok) {
+                 const text = await response.text().catch(() => null);
++                if (response.status === 404 && requestSessionId) {
++                    if (await this._recoverSession(requestSessionId) && !isSessionRetry) {
++                        return this._send(message, options, true);
++                    }
++                }
+                 if (response.status === 401 && this._authProvider) {
+                     // Prevent infinite recursion when server returns 401 after successful auth
+                     if (this._hasCompletedAuthFlow) {
+@@ -331,7 +376,7 @@ export class StreamableHTTPClientTransport {
+                     // Mark that we completed auth flow
+                     this._hasCompletedAuthFlow = true;
+                     // Purposely _not_ awaited, so we don't call onerror twice
+-                    return this.send(message);
++                    return this._send(message, options, isSessionRetry);
+                 }
+                 if (response.status === 403 && this._authProvider) {
+                     const { resourceMetadataUrl, scope, error } = extractWWWAuthenticateParams(response);
+@@ -358,7 +403,7 @@ export class StreamableHTTPClientTransport {
+                         if (result !== 'AUTHORIZED') {
+                             throw new UnauthorizedError();
+                         }
+-                        return this.send(message);
++                        return this._send(message, options, isSessionRetry);
+                     }
+                 }
+                 throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
