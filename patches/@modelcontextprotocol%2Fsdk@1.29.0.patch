@@ -102,7 +102,7 @@ index 6ac1da14dc7f6211ae70f7711c124b76098816d8..a840bc93e68182d6913132bb98c8cde3
       * After initialization has completed, this will be populated with the server's reported capabilities.
       */
 diff --git a/dist/cjs/client/streamableHttp.d.ts b/dist/cjs/client/streamableHttp.d.ts
-index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8ff60261b 100644
+index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..8bfac2353697b4b84f0bf05ca96a32d25a20a6d5 100644
 --- a/dist/cjs/client/streamableHttp.d.ts
 +++ b/dist/cjs/client/streamableHttp.d.ts
 @@ -110,9 +110,12 @@ export declare class StreamableHTTPClientTransport implements Transport {
@@ -118,9 +118,12 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      constructor(url: URL, opts?: StreamableHTTPClientTransportOptions);
      private _authThenStart;
      private _commonHeaders;
-@@ -142,6 +145,8 @@ export declare class StreamableHTTPClientTransport implements Transport {
+@@ -141,7 +144,11 @@ export declare class StreamableHTTPClientTransport implements Transport {
+     send(message: JSONRPCMessage | JSONRPCMessage[], options?: {
          resumptionToken?: string;
          onresumptiontoken?: (token: string) => void;
++        signal?: AbortSignal;
++        isRequestActive?: () => boolean;
      }): Promise<void>;
 +    private _recoverSession;
 +    private _send;
@@ -128,7 +131,7 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      /**
       * Terminates the current session by sending a DELETE request to the server.
 diff --git a/dist/cjs/client/streamableHttp.js b/dist/cjs/client/streamableHttp.js
-index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2af962432 100644
+index a29a7d3a0f14d9cd800ef5b296485237350c666f..f35df6d922e482f962791c80a465cdbeadc46267 100644
 --- a/dist/cjs/client/streamableHttp.js
 +++ b/dist/cjs/client/streamableHttp.js
 @@ -85,6 +85,7 @@ class StreamableHTTPClientTransport {
@@ -151,7 +154,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
                  if (response.status === 401 && this._authProvider) {
                      // Need to authenticate
                      return await this._authThenStart();
-@@ -290,7 +296,56 @@ class StreamableHTTPClientTransport {
+@@ -290,7 +296,73 @@ class StreamableHTTPClientTransport {
          this.onclose?.();
      }
      async send(message, options) {
@@ -166,7 +169,15 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
 +                    }
 +                    return false;
 +                }
-+                await this._sessionRecovery.catch(() => undefined);
++                try {
++                    await this._sessionRecovery;
++                }
++                catch {
++                    return false;
++                }
++                if (this._abortController?.signal.aborted) {
++                    return false;
++                }
 +                if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
 +                    return true;
 +                }
@@ -191,24 +202,33 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
 +            }
 +        });
 +        this._sessionRecovery = tracked;
-         try {
++        try {
 +            await tracked;
 +        }
 +        catch (error) {
 +            this._sessionId = undefined;
++            await this.close();
 +            throw error;
 +        }
 +        return this._sessionId !== undefined;
 +    }
 +    async _send(message, options, isSessionRetry) {
-+        try {
+         try {
++            options?.signal?.throwIfAborted();
++            if (options?.isRequestActive?.() === false) {
++                throw new Error('Request is no longer active');
++            }
 +            if (this._sessionRecovery && !(0, types_js_1.isInitializeRequest)(message) && !(0, types_js_1.isInitializedNotification)(message)) {
 +                await this._sessionRecovery;
++                options?.signal?.throwIfAborted();
++                if (options?.isRequestActive?.() === false) {
++                    throw new Error('Request is no longer active');
++                }
 +            }
              const { resumptionToken, onresumptiontoken } = options || {};
              if (resumptionToken) {
                  // If we have at last event ID, we need to reconnect the SSE stream
-@@ -298,6 +353,7 @@ class StreamableHTTPClientTransport {
+@@ -298,6 +370,7 @@ class StreamableHTTPClientTransport {
                  return;
              }
              const headers = await this._commonHeaders();
@@ -216,19 +236,24 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -315,6 +371,11 @@ class StreamableHTTPClientTransport {
+@@ -315,6 +388,16 @@ class StreamableHTTPClientTransport {
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
 +                if (response.status === 404 && requestSessionId) {
-+                    if (await this._recoverSession(requestSessionId) && !isSessionRetry) {
++                    const recovered = await this._recoverSession(requestSessionId);
++                    options?.signal?.throwIfAborted();
++                    if (options?.isRequestActive?.() === false) {
++                        throw new Error('Request is no longer active');
++                    }
++                    if (recovered && !isSessionRetry) {
 +                        return this._send(message, options, true);
 +                    }
 +                }
                  if (response.status === 401 && this._authProvider) {
                      // Prevent infinite recursion when server returns 401 after successful auth
                      if (this._hasCompletedAuthFlow) {
-@@ -335,7 +396,7 @@ class StreamableHTTPClientTransport {
+@@ -335,7 +418,7 @@ class StreamableHTTPClientTransport {
                      // Mark that we completed auth flow
                      this._hasCompletedAuthFlow = true;
                      // Purposely _not_ awaited, so we don't call onerror twice
@@ -237,7 +262,7 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
                  }
                  if (response.status === 403 && this._authProvider) {
                      const { resourceMetadataUrl, scope, error } = (0, auth_js_1.extractWWWAuthenticateParams)(response);
-@@ -362,7 +423,7 @@ class StreamableHTTPClientTransport {
+@@ -362,7 +445,7 @@ class StreamableHTTPClientTransport {
                          if (result !== 'AUTHORIZED') {
                              throw new auth_js_1.UnauthorizedError();
                          }
@@ -246,6 +271,45 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..a0e9102f6e8da19689f895e4ba014eb2
                      }
                  }
                  throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
+diff --git a/dist/cjs/shared/protocol.js b/dist/cjs/shared/protocol.js
+index 3617e787f0ba70447c99501aee7aa67584d89758..2530b5dc01b4ba3ffeac324b2db9b336c8883957 100644
+--- a/dist/cjs/shared/protocol.js
++++ b/dist/cjs/shared/protocol.js
+@@ -744,7 +744,13 @@ class Protocol {
+             }
+             else {
+                 // No related task - send through transport normally
+-                this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch(error => {
++                this._transport.send(jsonrpcRequest, {
++                    relatedRequestId,
++                    resumptionToken,
++                    onresumptiontoken,
++                    signal: options?.signal,
++                    isRequestActive: () => this._responseHandlers.has(messageId)
++                }).catch(error => {
+                     this._cleanupTimeout(messageId);
+                     reject(error);
+                 });
+diff --git a/dist/cjs/shared/transport.d.ts b/dist/cjs/shared/transport.d.ts
+index 1bd95efb41fcfd1ae09712ca968c57d828e0acaf..5d5d66e368a426a4afd8ffeb3e194d4f10b86950 100644
+--- a/dist/cjs/shared/transport.d.ts
++++ b/dist/cjs/shared/transport.d.ts
+@@ -34,6 +34,15 @@ export type TransportSendOptions = {
+      * This allows clients to persist the latest token for potential reconnection.
+      */
+     onresumptiontoken?: (token: string) => void;
++    /**
++     * Aborts this send before it is dispatched or replayed after transport recovery.
++     */
++    signal?: AbortSignal;
++    /**
++     * Returns whether the request is still waiting for a response.
++     * @internal
++     */
++    isRequestActive?: () => boolean;
+ };
+ /**
+  * Describes the minimal contract for an MCP transport that a client or server can communicate over.
 diff --git a/dist/esm/client/index.d.ts b/dist/esm/client/index.d.ts
 index 6f567a193626587a2730b5a49293ca5dfd4181ea..eacfe9a2b20ab8567a256f8af3ccc2a2af1a362b 100644
 --- a/dist/esm/client/index.d.ts
@@ -350,7 +414,7 @@ index 49b12c6cd918c457420fef7ad5528a9443d1a191..a4bf651835025b0c6df497063ede6304
       * After initialization has completed, this will be populated with the server's reported capabilities.
       */
 diff --git a/dist/esm/client/streamableHttp.d.ts b/dist/esm/client/streamableHttp.d.ts
-index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8ff60261b 100644
+index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..8bfac2353697b4b84f0bf05ca96a32d25a20a6d5 100644
 --- a/dist/esm/client/streamableHttp.d.ts
 +++ b/dist/esm/client/streamableHttp.d.ts
 @@ -110,9 +110,12 @@ export declare class StreamableHTTPClientTransport implements Transport {
@@ -366,9 +430,12 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      constructor(url: URL, opts?: StreamableHTTPClientTransportOptions);
      private _authThenStart;
      private _commonHeaders;
-@@ -142,6 +145,8 @@ export declare class StreamableHTTPClientTransport implements Transport {
+@@ -141,7 +144,11 @@ export declare class StreamableHTTPClientTransport implements Transport {
+     send(message: JSONRPCMessage | JSONRPCMessage[], options?: {
          resumptionToken?: string;
          onresumptiontoken?: (token: string) => void;
++        signal?: AbortSignal;
++        isRequestActive?: () => boolean;
      }): Promise<void>;
 +    private _recoverSession;
 +    private _send;
@@ -376,7 +443,7 @@ index 6035b24625d7e7227a71a57fb8d8beccc2cea2f4..3ca1c5330cd5a4c3bc54622a50e54fc8
      /**
       * Terminates the current session by sending a DELETE request to the server.
 diff --git a/dist/esm/client/streamableHttp.js b/dist/esm/client/streamableHttp.js
-index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2f458faff 100644
+index 624172aa24ae255a67c083f9c19053343e4a0581..1ae8ac911690da60d7050c13ba6de5669d6a6b7d 100644
 --- a/dist/esm/client/streamableHttp.js
 +++ b/dist/esm/client/streamableHttp.js
 @@ -1,5 +1,5 @@
@@ -406,7 +473,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
                  if (response.status === 401 && this._authProvider) {
                      // Need to authenticate
                      return await this._authThenStart();
-@@ -286,7 +292,56 @@ export class StreamableHTTPClientTransport {
+@@ -286,7 +292,73 @@ export class StreamableHTTPClientTransport {
          this.onclose?.();
      }
      async send(message, options) {
@@ -421,7 +488,15 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
 +                    }
 +                    return false;
 +                }
-+                await this._sessionRecovery.catch(() => undefined);
++                try {
++                    await this._sessionRecovery;
++                }
++                catch {
++                    return false;
++                }
++                if (this._abortController?.signal.aborted) {
++                    return false;
++                }
 +                if (this._sessionId !== undefined && this._sessionId !== expiredSessionId) {
 +                    return true;
 +                }
@@ -446,24 +521,33 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
 +            }
 +        });
 +        this._sessionRecovery = tracked;
-         try {
++        try {
 +            await tracked;
 +        }
 +        catch (error) {
 +            this._sessionId = undefined;
++            await this.close();
 +            throw error;
 +        }
 +        return this._sessionId !== undefined;
 +    }
 +    async _send(message, options, isSessionRetry) {
-+        try {
+         try {
++            options?.signal?.throwIfAborted();
++            if (options?.isRequestActive?.() === false) {
++                throw new Error('Request is no longer active');
++            }
 +            if (this._sessionRecovery && !isInitializeRequest(message) && !isInitializedNotification(message)) {
 +                await this._sessionRecovery;
++                options?.signal?.throwIfAborted();
++                if (options?.isRequestActive?.() === false) {
++                    throw new Error('Request is no longer active');
++                }
 +            }
              const { resumptionToken, onresumptiontoken } = options || {};
              if (resumptionToken) {
                  // If we have at last event ID, we need to reconnect the SSE stream
-@@ -294,6 +349,7 @@ export class StreamableHTTPClientTransport {
+@@ -294,6 +366,7 @@ export class StreamableHTTPClientTransport {
                  return;
              }
              const headers = await this._commonHeaders();
@@ -471,19 +555,24 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -311,6 +367,11 @@ export class StreamableHTTPClientTransport {
+@@ -311,6 +384,16 @@ export class StreamableHTTPClientTransport {
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
 +                if (response.status === 404 && requestSessionId) {
-+                    if (await this._recoverSession(requestSessionId) && !isSessionRetry) {
++                    const recovered = await this._recoverSession(requestSessionId);
++                    options?.signal?.throwIfAborted();
++                    if (options?.isRequestActive?.() === false) {
++                        throw new Error('Request is no longer active');
++                    }
++                    if (recovered && !isSessionRetry) {
 +                        return this._send(message, options, true);
 +                    }
 +                }
                  if (response.status === 401 && this._authProvider) {
                      // Prevent infinite recursion when server returns 401 after successful auth
                      if (this._hasCompletedAuthFlow) {
-@@ -331,7 +392,7 @@ export class StreamableHTTPClientTransport {
+@@ -331,7 +414,7 @@ export class StreamableHTTPClientTransport {
                      // Mark that we completed auth flow
                      this._hasCompletedAuthFlow = true;
                      // Purposely _not_ awaited, so we don't call onerror twice
@@ -492,7 +581,7 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
                  }
                  if (response.status === 403 && this._authProvider) {
                      const { resourceMetadataUrl, scope, error } = extractWWWAuthenticateParams(response);
-@@ -358,7 +419,7 @@ export class StreamableHTTPClientTransport {
+@@ -358,7 +441,7 @@ export class StreamableHTTPClientTransport {
                          if (result !== 'AUTHORIZED') {
                              throw new UnauthorizedError();
                          }
@@ -501,3 +590,42 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..7074b8a233690053a8226dc409ce32b2
                      }
                  }
                  throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
+diff --git a/dist/esm/shared/protocol.js b/dist/esm/shared/protocol.js
+index bfa2b7120a0f50c569364ea5264e6f811076f44f..6a263b77f28e1dae462b32d031fc1826e598e622 100644
+--- a/dist/esm/shared/protocol.js
++++ b/dist/esm/shared/protocol.js
+@@ -740,7 +740,13 @@ export class Protocol {
+             }
+             else {
+                 // No related task - send through transport normally
+-                this._transport.send(jsonrpcRequest, { relatedRequestId, resumptionToken, onresumptiontoken }).catch(error => {
++                this._transport.send(jsonrpcRequest, {
++                    relatedRequestId,
++                    resumptionToken,
++                    onresumptiontoken,
++                    signal: options?.signal,
++                    isRequestActive: () => this._responseHandlers.has(messageId)
++                }).catch(error => {
+                     this._cleanupTimeout(messageId);
+                     reject(error);
+                 });
+diff --git a/dist/esm/shared/transport.d.ts b/dist/esm/shared/transport.d.ts
+index 1bd95efb41fcfd1ae09712ca968c57d828e0acaf..5d5d66e368a426a4afd8ffeb3e194d4f10b86950 100644
+--- a/dist/esm/shared/transport.d.ts
++++ b/dist/esm/shared/transport.d.ts
+@@ -34,6 +34,15 @@ export type TransportSendOptions = {
+      * This allows clients to persist the latest token for potential reconnection.
+      */
+     onresumptiontoken?: (token: string) => void;
++    /**
++     * Aborts this send before it is dispatched or replayed after transport recovery.
++     */
++    signal?: AbortSignal;
++    /**
++     * Returns whether the request is still waiting for a response.
++     * @internal
++     */
++    isRequestActive?: () => boolean;
+ };
+ /**
+  * Describes the minimal contract for an MCP transport that a client or server can communicate over.
