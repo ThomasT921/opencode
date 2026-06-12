@@ -266,6 +266,14 @@ const resourceNoLLMServer = testEffect(
                     blob: Buffer.from("MCP text blob fixture").toString("base64"),
                   },
                 ]
+            : uri === "opencode-fixture://binary"
+              ? [
+                  {
+                    uri,
+                    mimeType: "application/octet-stream",
+                    blob: "AAEC",
+                  },
+                ]
             : [
                 {
                   uri,
@@ -2097,6 +2105,18 @@ resourceNoLLMServer.instance(
           },
           {
             type: "file",
+            mime: "application/octet-stream",
+            url: "opencode-fixture://binary",
+            filename: "fixture-binary",
+            source: {
+              type: "resource",
+              clientName: "resource-only-fixture",
+              uri: "opencode-fixture://binary",
+              text: { value: "@fixture-binary", start: 34, end: 49 },
+            },
+          },
+          {
+            type: "file",
             mime: "image/png",
             url: "opencode-fixture://pixel",
             filename: "fixture-pixel",
@@ -2114,11 +2134,25 @@ resourceNoLLMServer.instance(
       expect(message.parts.some((part) => part.type === "text" && part.text === "MCP text blob fixture")).toBe(true)
       expect(
         message.parts.some(
+          (part) => part.type === "text" && part.text === "[Binary content: application/octet-stream]",
+        ),
+      ).toBe(true)
+      expect(
+        message.parts.some(
           (part) =>
             part.type === "file" &&
             !part.source &&
             part.mime === "text/plain; charset=utf-8" &&
             part.url.startsWith("data:text/plain; charset=utf-8;base64,"),
+        ),
+      ).toBe(true)
+      expect(
+        message.parts.some(
+          (part) =>
+            part.type === "file" &&
+            part.source?.type === "resource" &&
+            part.mime === "application/octet-stream" &&
+            part.url.startsWith("data:application/octet-stream;base64,"),
         ),
       ).toBe(true)
       expect(

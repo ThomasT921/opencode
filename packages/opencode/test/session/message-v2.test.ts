@@ -351,6 +351,19 @@ describe("session.message-v2.toModelMessage", () => {
             filename: "guide.txt",
             url: "data:text/plain; charset=utf-8;base64,IyBSZXNvdXJjZSBjb250ZW50cw==",
           },
+          {
+            ...basePart(messageID, "p4"),
+            type: "file",
+            mime: "application/octet-stream",
+            filename: "resource.bin",
+            url: "data:application/octet-stream;base64,AAEC",
+            source: {
+              type: "resource",
+              clientName: "resource-only-fixture",
+              uri: "opencode-fixture://binary",
+              text: { value: "@fixture-binary", start: 15, end: 30 },
+            },
+          },
         ] as SessionV1.Part[],
       },
     ]
