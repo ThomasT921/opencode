@@ -1,6 +1,9 @@
-import { SessionV2 } from "@opencode-ai/core/session"
+import { Credential } from "@opencode-ai/core/credential"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { LocationServiceMap } from "@opencode-ai/core/location-layer"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local"
 import { Layer } from "effect"
 import { layer as locationLayer } from "./groups/location"
 import { sessionLocationLayer } from "./middleware/session-location"
@@ -17,11 +20,9 @@ import { AgentHandler } from "./handlers/agent"
 import { HealthHandler } from "./handlers/health"
 import { QuestionHandler } from "./handlers/question"
 import { ReferenceHandler } from "./handlers/reference"
-import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { LocationHandler } from "./handlers/location"
 import { IntegrationHandler } from "./handlers/integration"
 import { CredentialHandler } from "./handlers/credential"
-import { Credential } from "@opencode-ai/core/credential"
 import { ProjectCopyHandler } from "./handlers/project-copy"
 
 export const handlers = Layer.mergeAll(
@@ -45,9 +46,9 @@ export const handlers = Layer.mergeAll(
 ).pipe(
   Layer.provide(sessionLocationLayer),
   Layer.provide(locationLayer),
-  Layer.provide(SessionV2.defaultLayer),
-  Layer.provide(SessionExecutionLocal.defaultLayer),
-  Layer.provide(PermissionSaved.defaultLayer),
+  Layer.provide(LayerNode.buildLayer(SessionV2.node)),
+  Layer.provide(LayerNode.buildLayer(SessionExecutionLocal.node)),
+  Layer.provide(LayerNode.buildLayer(PermissionSaved.node)),
   Layer.provide(LocationServiceMap.layer),
-  Layer.provide(Credential.defaultLayer),
+  Layer.provide(LayerNode.buildLayer(Credential.node)),
 )

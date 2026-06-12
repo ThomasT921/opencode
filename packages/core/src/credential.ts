@@ -3,6 +3,7 @@ export * as Credential from "./credential"
 import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "./database/database"
+import { LayerNode } from "./effect/layer-node"
 import { IntegrationSchema } from "./integration/schema"
 import { NonNegativeInt, withStatics } from "./schema"
 import { Identifier } from "./util/identifier"
@@ -144,3 +145,4 @@ export const layer = Layer.effect(
 )
 
 export const defaultLayer = layer.pipe(Layer.provide(Database.defaultLayer))
+export const node = LayerNode.make(layer, [Database.node])

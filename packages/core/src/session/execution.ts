@@ -1,6 +1,7 @@
 export * as SessionExecution from "./execution"
 
 import { Context, Effect, Layer } from "effect"
+import { LayerNode } from "../effect/layer-node"
 import { SessionRunner } from "./runner/index"
 import { SessionSchema } from "./schema"
 
@@ -21,3 +22,4 @@ export const noopLayer = Layer.succeed(
   Service,
   Service.of({ resume: () => Effect.void, wake: () => Effect.void, interrupt: () => Effect.void }),
 )
+export const noopNode = LayerNode.make(noopLayer, [])

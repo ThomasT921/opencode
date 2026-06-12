@@ -2,6 +2,7 @@ export * as SessionV2 from "./session"
 export * from "./session/schema"
 
 import { Cause, DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
+import { LayerNode } from "./effect/layer-node"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
@@ -434,3 +435,11 @@ export const defaultLayer = layer.pipe(
   Layer.provide(ProjectV2.defaultLayer),
   Layer.orDie,
 )
+export const node = LayerNode.make(layer.pipe(Layer.orDie), [
+  Database.node,
+  EventV2.node,
+  ProjectV2.node,
+  SessionExecution.noopNode,
+  SessionProjector.node,
+  SessionStore.node,
+])

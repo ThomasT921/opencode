@@ -3,6 +3,7 @@ export * as PermissionSaved from "./saved"
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
+import { LayerNode } from "../effect/layer-node"
 import { ProjectV2 } from "../project"
 import { withStatics } from "../schema"
 import { Identifier } from "../util/identifier"
@@ -85,3 +86,4 @@ export const layer = Layer.effect(
 )
 
 export const defaultLayer = layer.pipe(Layer.provide(Database.defaultLayer))
+export const node = LayerNode.make(layer, [Database.node])

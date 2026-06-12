@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { LayerNode } from "../../effect/layer-node"
 import { LocationServiceMap } from "../../location-layer"
 import { SessionRunCoordinator } from "../run-coordinator"
 import { SessionRunner } from "../runner"
@@ -33,3 +34,6 @@ export const layer = Layer.effect(
 )
 
 export const defaultLayer = layer.pipe(Layer.provide(SessionStore.defaultLayer))
+export const node = LayerNode.make(layer.pipe(Layer.provide(LocationServiceMap.layer)), [SessionStore.node])
+
+export * as SessionExecutionLocal from "./local"
