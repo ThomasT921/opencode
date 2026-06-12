@@ -87,7 +87,7 @@ index 6ac1da14dc7f6211ae70f7711c124b76098816d8..f239ab8e1ede3fdad2a08de3ac4f69c2
       * After initialization has completed, this will be populated with the server's reported capabilities.
       */
 diff --git a/dist/cjs/client/streamableHttp.js b/dist/cjs/client/streamableHttp.js
-index a29a7d3a0f14d9cd800ef5b296485237350c666f..b687a62d9c12231a6bff4737b36c185a55bb8f71 100644
+index a29a7d3a0f14d9cd800ef5b296485237350c666f..930ba95105655418440e7d0e932e97530d0b0bfb 100644
 --- a/dist/cjs/client/streamableHttp.js
 +++ b/dist/cjs/client/streamableHttp.js
 @@ -290,7 +290,38 @@ class StreamableHTTPClientTransport {
@@ -137,11 +137,17 @@ index a29a7d3a0f14d9cd800ef5b296485237350c666f..b687a62d9c12231a6bff4737b36c185a
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -315,6 +347,15 @@ class StreamableHTTPClientTransport {
+@@ -310,11 +342,20 @@ class StreamableHTTPClientTransport {
+             const response = await (this._fetch ?? fetch)(this._url, init);
+             // Handle session ID received during initialization
+             const sessionId = response.headers.get('mcp-session-id');
+-            if (sessionId) {
++            if (sessionId && (requestSessionId === undefined || this._sessionId === requestSessionId)) {
+                 this._sessionId = sessionId;
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
-+                if (response.status === 404 && requestSessionId && !isSessionRetry) {
++                if (response.status === 404 && requestSessionId && !isSessionRetry && !(0, types_js_1.isInitializedNotification)(message)) {
 +                    const recovered = await this._recoverSession(requestSessionId);
 +                    if (options?.isRequestActive?.() === false) {
 +                        throw new Error('Request is no longer active');
@@ -278,7 +284,7 @@ index 49b12c6cd918c457420fef7ad5528a9443d1a191..ac182f6ce128ed27ec7fa4abb816879d
       * After initialization has completed, this will be populated with the server's reported capabilities.
       */
 diff --git a/dist/esm/client/streamableHttp.js b/dist/esm/client/streamableHttp.js
-index 624172aa24ae255a67c083f9c19053343e4a0581..4a1810d4b128f59be33d91e0f96deaa0b4b99de4 100644
+index 624172aa24ae255a67c083f9c19053343e4a0581..be2518af2fec26c7c9398f52e5d667bfa42d0879 100644
 --- a/dist/esm/client/streamableHttp.js
 +++ b/dist/esm/client/streamableHttp.js
 @@ -1,5 +1,5 @@
@@ -335,11 +341,17 @@ index 624172aa24ae255a67c083f9c19053343e4a0581..4a1810d4b128f59be33d91e0f96deaa0
              headers.set('content-type', 'application/json');
              headers.set('accept', 'application/json, text/event-stream');
              const init = {
-@@ -311,6 +343,15 @@ export class StreamableHTTPClientTransport {
+@@ -306,11 +338,20 @@ export class StreamableHTTPClientTransport {
+             const response = await (this._fetch ?? fetch)(this._url, init);
+             // Handle session ID received during initialization
+             const sessionId = response.headers.get('mcp-session-id');
+-            if (sessionId) {
++            if (sessionId && (requestSessionId === undefined || this._sessionId === requestSessionId)) {
+                 this._sessionId = sessionId;
              }
              if (!response.ok) {
                  const text = await response.text().catch(() => null);
-+                if (response.status === 404 && requestSessionId && !isSessionRetry) {
++                if (response.status === 404 && requestSessionId && !isSessionRetry && !isInitializedNotification(message)) {
 +                    const recovered = await this._recoverSession(requestSessionId);
 +                    if (options?.isRequestActive?.() === false) {
 +                        throw new Error('Request is no longer active');
