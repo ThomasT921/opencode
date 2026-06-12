@@ -728,7 +728,7 @@ export const layer = Layer.effect(
             const exit = yield* mcp.readResource(clientName, uri).pipe(Effect.exit)
             if (Exit.isSuccess(exit)) {
               const content = exit.value
-              if (!content) throw new Error(`Failed to read MCP resource: ${clientName}/${uri}`)
+              if (!content) throw new Error(`Resource not found: ${clientName}/${uri}`)
               const items = Array.isArray(content.contents) ? content.contents : [content.contents]
               for (const c of items) {
                 if ("text" in c && c.text) {
@@ -740,40 +740,13 @@ export const layer = Layer.effect(
                     text: c.text,
                   })
                 } else if ("blob" in c && c.blob) {
-                  const mime = ("mimeType" in c ? c.mimeType : undefined) ?? part.mime
-                  const url = `data:${mime};base64,${c.blob}`
-                  const mediaType = mime.split(";")[0]?.trim().toLowerCase()
-                  if (mediaType === "text/plain") {
-                    pieces.push({
-                      messageID: info.id,
-                      sessionID: input.sessionID,
-                      type: "text",
-                      synthetic: true,
-                      text: decodeDataUrl(url),
-                    })
-                  }
-                  const supported =
-                    mediaType?.startsWith("image/") ||
-                    mediaType?.startsWith("audio/") ||
-                    mediaType?.startsWith("video/") ||
-                    mediaType === "application/pdf"
-                  if (mediaType !== "text/plain" && !supported) {
-                    pieces.push({
-                      messageID: info.id,
-                      sessionID: input.sessionID,
-                      type: "text",
-                      synthetic: true,
-                      text: `[Binary content: ${mime}]`,
-                    })
-                  }
+                  const mime = "mimeType" in c ? c.mimeType : part.mime
                   pieces.push({
                     messageID: info.id,
                     sessionID: input.sessionID,
-                    type: "file",
-                    mime,
-                    filename: part.filename,
-                    url,
-                    source: supported || mediaType === "text/plain" ? undefined : part.source,
+                    type: "text",
+                    synthetic: true,
+                    text: `[Binary content: ${mime}]`,
                   })
                 }
               }
@@ -1019,7 +992,7 @@ export const layer = Layer.effect(
       )
 
       const parts = yield* Effect.forEach(resolvedParts, (part) =>
-        part.type === "file" && part.source?.type !== "resource" && part.mime.startsWith("image/")
+        part.type === "file" && part.mime.startsWith("image/")
           ? image.normalize(part).pipe(
               Effect.catchIf(
                 (error) => error instanceof Image.ResizerUnavailableError,

@@ -219,10 +219,10 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             type: "text",
             text: part.text,
           })
-        // Text, directories, and MCP references are resolved before provider conversion.
+        // text/plain and directory files are converted into text parts, ignore them
         if (
           part.type === "file" &&
-          part.mime.split(";")[0]?.trim().toLowerCase() !== "text/plain" &&
+          part.mime !== "text/plain" &&
           part.mime !== "application/x-directory" &&
           part.source?.type !== "resource"
         ) {

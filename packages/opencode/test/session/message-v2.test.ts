@@ -319,7 +319,7 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
-  test("does not forward resolved MCP resource references as file downloads", async () => {
+  test("does not forward MCP resource references as file downloads", async () => {
     const messageID = "m-user"
     const input: SessionV1.WithParts[] = [
       {
@@ -334,34 +334,14 @@ describe("session.message-v2.toModelMessage", () => {
           {
             ...basePart(messageID, "p2"),
             type: "file",
-            mime: "text/markdown",
-            filename: "guide",
-            url: "opencode-fixture://guide",
+            mime: "application/json",
+            filename: "status",
+            url: "status://info",
             source: {
               type: "resource",
               clientName: "resource-only-fixture",
-              uri: "opencode-fixture://guide",
-              text: { value: "@fixture-guide", start: 0, end: 14 },
-            },
-          },
-          {
-            ...basePart(messageID, "p3"),
-            type: "file",
-            mime: "text/plain; charset=utf-8",
-            filename: "guide.txt",
-            url: "data:text/plain; charset=utf-8;base64,IyBSZXNvdXJjZSBjb250ZW50cw==",
-          },
-          {
-            ...basePart(messageID, "p4"),
-            type: "file",
-            mime: "application/octet-stream",
-            filename: "resource.bin",
-            url: "data:application/octet-stream;base64,AAEC",
-            source: {
-              type: "resource",
-              clientName: "resource-only-fixture",
-              uri: "opencode-fixture://binary",
-              text: { value: "@fixture-binary", start: 15, end: 30 },
+              uri: "status://info",
+              text: { value: "@status", start: 0, end: 7 },
             },
           },
         ] as SessionV1.Part[],

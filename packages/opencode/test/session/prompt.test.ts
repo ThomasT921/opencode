@@ -108,32 +108,28 @@ function errorTool(parts: SessionV1.Part[]) {
   return part?.state.status === "error" ? (part as ErrorToolPart) : undefined
 }
 
-function makeMcp(readResource: MCP.Interface["readResource"] = () => Effect.succeed(undefined)) {
-  return Layer.succeed(
-    MCP.Service,
-    MCP.Service.of({
-      status: () => Effect.succeed({}),
-      clients: () => Effect.succeed({}),
-      tools: () => Effect.succeed({}),
-      prompts: () => Effect.succeed({}),
-      resources: () => Effect.succeed({}),
-      add: () => Effect.succeed({ status: { status: "disabled" as const } }),
-      connect: () => Effect.void,
-      disconnect: () => Effect.void,
-      getPrompt: () => Effect.succeed(undefined),
-      readResource,
-      startAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-      authenticate: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-      finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
-      removeAuth: () => Effect.void,
-      supportsOAuth: () => Effect.succeed(false),
-      hasStoredTokens: () => Effect.succeed(false),
-      getAuthStatus: () => Effect.succeed("not_authenticated" as const),
-    }),
-  )
-}
-
-const mcp = makeMcp()
+const mcp = Layer.succeed(
+  MCP.Service,
+  MCP.Service.of({
+    status: () => Effect.succeed({}),
+    clients: () => Effect.succeed({}),
+    tools: () => Effect.succeed({}),
+    prompts: () => Effect.succeed({}),
+    resources: () => Effect.succeed({}),
+    add: () => Effect.succeed({ status: { status: "disabled" as const } }),
+    connect: () => Effect.void,
+    disconnect: () => Effect.void,
+    getPrompt: () => Effect.succeed(undefined),
+    readResource: () => Effect.succeed(undefined),
+    startAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+    authenticate: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+    finishAuth: () => Effect.die("unexpected MCP auth in prompt-effect tests"),
+    removeAuth: () => Effect.void,
+    supportsOAuth: () => Effect.succeed(false),
+    hasStoredTokens: () => Effect.succeed(false),
+    getAuthStatus: () => Effect.succeed("not_authenticated" as const),
+  }),
+)
 
 const lsp = Layer.succeed(
   LSP.Service,
@@ -167,9 +163,7 @@ const blockingProcessor = Layer.succeed(
   }),
 )
 
-type PromptOptions = { processor?: "blocking"; mcp?: ReturnType<typeof makeMcp> }
-
-function makePrompt(input?: PromptOptions) {
+function makePrompt(input?: { processor?: "blocking" }) {
   const deps = Layer.mergeAll(
     Session.defaultLayer,
     Snapshot.defaultLayer,
@@ -182,7 +176,7 @@ function makePrompt(input?: PromptOptions) {
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
     lsp,
-    input?.mcp ?? mcp,
+    mcp,
     FSUtil.defaultLayer,
     BackgroundJob.defaultLayer,
     status,
@@ -235,56 +229,16 @@ function makePrompt(input?: PromptOptions) {
   )
 }
 
-function makeHttp(input?: PromptOptions) {
+function makeHttp(input?: { processor?: "blocking" }) {
   return Layer.mergeAll(TestLLMServer.layer, makePrompt(input))
 }
 
-function makeHttpNoLLMServer(input?: PromptOptions) {
+function makeHttpNoLLMServer(input?: { processor?: "blocking" }) {
   return makePrompt(input)
 }
 
 const it = testEffect(makeHttp())
 const noLLMServer = testEffect(makeHttpNoLLMServer())
-const resourceNoLLMServer = testEffect(
-  makeHttpNoLLMServer({
-    mcp: makeMcp((_clientName, uri) =>
-      Effect.succeed({
-        contents:
-          uri === "opencode-fixture://guide"
-            ? [
-                {
-                  uri,
-                  mimeType: "text/markdown",
-                  text: "# MCP resource fixture",
-                },
-              ]
-            : uri === "opencode-fixture://text-blob"
-              ? [
-                  {
-                    uri,
-                    mimeType: "text/plain; charset=utf-8",
-                    blob: Buffer.from("MCP text blob fixture").toString("base64"),
-                  },
-                ]
-            : uri === "opencode-fixture://binary"
-              ? [
-                  {
-                    uri,
-                    mimeType: "application/octet-stream",
-                    blob: "AAEC",
-                  },
-                ]
-            : [
-                {
-                  uri,
-                  mimeType: "image/png",
-                  blob: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-                },
-              ],
-      }),
-    ),
-  }),
-)
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
@@ -2060,115 +2014,6 @@ noLLMServer.instance(
         (part) => part.type === "text" && part.synthetic && part.text.includes("Read tool failed to read"),
       )
       expect(hasFailure).toBe(true)
-
-      yield* sessions.remove(session.id)
-    }),
-  { config: cfg },
-)
-
-resourceNoLLMServer.instance(
-  "resolves MCP resource text and blobs without treating custom URIs as files",
-  () =>
-    Effect.gen(function* () {
-      const prompt = yield* SessionPrompt.Service
-      const sessions = yield* Session.Service
-      const session = yield* sessions.create({})
-
-      const message = yield* prompt.prompt({
-        sessionID: session.id,
-        agent: "build",
-        noReply: true,
-        parts: [
-          {
-            type: "file",
-            mime: "text/markdown",
-            url: "opencode-fixture://guide",
-            filename: "fixture-guide",
-            source: {
-              type: "resource",
-              clientName: "resource-only-fixture",
-              uri: "opencode-fixture://guide",
-              text: { value: "@fixture-guide", start: 0, end: 14 },
-            },
-          },
-          {
-            type: "file",
-            mime: "text/plain",
-            url: "opencode-fixture://text-blob",
-            filename: "fixture-text-blob",
-            source: {
-              type: "resource",
-              clientName: "resource-only-fixture",
-              uri: "opencode-fixture://text-blob",
-              text: { value: "@fixture-text-blob", start: 15, end: 33 },
-            },
-          },
-          {
-            type: "file",
-            mime: "application/octet-stream",
-            url: "opencode-fixture://binary",
-            filename: "fixture-binary",
-            source: {
-              type: "resource",
-              clientName: "resource-only-fixture",
-              uri: "opencode-fixture://binary",
-              text: { value: "@fixture-binary", start: 34, end: 49 },
-            },
-          },
-          {
-            type: "file",
-            mime: "image/png",
-            url: "opencode-fixture://pixel",
-            filename: "fixture-pixel",
-            source: {
-              type: "resource",
-              clientName: "resource-only-fixture",
-              uri: "opencode-fixture://pixel",
-              text: { value: "@fixture-pixel", start: 15, end: 29 },
-            },
-          },
-        ],
-      })
-
-      expect(message.parts.some((part) => part.type === "text" && part.text === "# MCP resource fixture")).toBe(true)
-      expect(message.parts.some((part) => part.type === "text" && part.text === "MCP text blob fixture")).toBe(true)
-      expect(
-        message.parts.some(
-          (part) => part.type === "text" && part.text === "[Binary content: application/octet-stream]",
-        ),
-      ).toBe(true)
-      expect(
-        message.parts.some(
-          (part) =>
-            part.type === "file" &&
-            !part.source &&
-            part.mime === "text/plain; charset=utf-8" &&
-            part.url.startsWith("data:text/plain; charset=utf-8;base64,"),
-        ),
-      ).toBe(true)
-      expect(
-        message.parts.some(
-          (part) =>
-            part.type === "file" &&
-            part.source?.type === "resource" &&
-            part.mime === "application/octet-stream" &&
-            part.url.startsWith("data:application/octet-stream;base64,"),
-        ),
-      ).toBe(true)
-      expect(
-        message.parts.some(
-          (part) => part.type === "file" && part.source?.type === "resource" && part.url === "opencode-fixture://pixel",
-        ),
-      ).toBe(true)
-      expect(
-        message.parts.some(
-          (part) =>
-            part.type === "file" &&
-            !part.source &&
-            part.mime === "image/png" &&
-            part.url.startsWith("data:image/png;base64,"),
-        ),
-      ).toBe(true)
 
       yield* sessions.remove(session.id)
     }),
